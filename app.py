@@ -6,11 +6,12 @@ from urllib.parse import urlparse
 
 import streamlit as st
 from supabase import create_client
+from workflow import summarize_workflow
 
 logger = logging.getLogger("beyond_cognition")
 st.set_page_config(page_title="فراتر از شناخت", page_icon="🧠", layout="wide")
 
-APP_VERSION = "0.4.4"
+APP_VERSION = "0.4.5"
 PAGE_SIZE = 500
 TABLES = ("research_sessions", "research_steps", "research_evidence", "model_runs", "research_records")
 ROLES = ["صورت‌بندی مسئله", "تحلیل‌گر", "فرضیه‌ساز", "منتقد", "ارزیاب شواهد", "ترکیب‌کننده", "یادداشت پژوهشگر"]
@@ -146,8 +147,7 @@ with tab_new:
     with st.form("create_session_form", clear_on_submit=True):
         title = st.text_input("عنوان پژوهش", placeholder="عنوان کوتاه و مشخص")
         question = st.text_area("پرسش مرکزی", height=130,
-                                placeholder="دقیقاً چه چیزی را می‌خواهیم بررسی کنیم؟")
-        create = st.form_submit_button("ایجاد جلسه", type="primary", use_container_width=True)
+                                placeholder="دقیقاً چه چیزی را می‌خواهیم بررسی کنیم؟")        create = st.form_submit_button("ایجاد جلسه", type="primary", use_container_width=True)
     if create:
         if not title.strip() or not question.strip():
             st.warning("عنوان و پرسش مرکزی هر دو الزامی‌اند.")
@@ -238,16 +238,23 @@ with tab_work:
                         evidence_by_step.setdefault(evidence["step_id"], []).append(evidence)
 
             total_evidence = sum(len(v) for v in evidence_by_step.values())
-            completed_roles = {step.get("role") for step in steps}
             required_roles = ROLES[:6]
-            completed_count = sum(role in completed_roles for role in required_roles)
-            missing_roles = [role for role in required_roles if role not in completed_roles]
+            workflow_state = summarize_workflow(steps, required_roles)
+            completed_count = workflow_state["completed_count"]
+            missing_roles = workflow_state["missing_roles"]
             st.markdown("### پیشرفت گردش‌کار")
             st.progress(completed_count / len(required_roles))
+            st.caption(f'پیشرفت نقش‌های اصلی: {completed_count} از {len(required_roles)}')
+            if workflow_state["next_role"]:
+                st.info("گام پیشنهادی بعدی: " + workflow_state["next_role"])
             if missing_roles:
                 st.caption("نقش‌های ثبت‌نشده: " + "، ".join(missing_roles))
             else:
-                st.success("هر شش نقش اصلی گردش‌کار ثبت شده‌اند؛ کیفیت شواهد و استدلال‌ها همچنان باید ارزیابی شود.")
+                st.success("هر شش نقش اصلی ثبت شده‌اند؛ کیفیت شواهد و استدلال‌ها همچنان باید ارزیابی شود.")
+            if workflow_state["duplicate_roles"]:
+                st.warning("نقش‌های تکراری ثبت شده‌اند: " + "، ".join(workflow_state["duplicate_roles"]))
+            if workflow_state["out_of_order"]:
+                st.warning("ترتیب برخی مراحل با الگوی پژوهش هم‌خوان نیست: " + "، ".join(workflow_state["out_of_order"]))
             k = st.columns(3)
             k[0].metric("مراحل ثبت‌شده", len(steps))
             k[1].metric("شواهد پیوست‌شده", total_evidence)
@@ -327,8 +334,7 @@ with tab_work:
                         else:
                             result = db_call(lambda: update_row("research_steps", {
                                 "role": edit_role, "input_text": edit_input.strip(),
-                                "output_text": edit_output.strip(),
-                                "epistemic_status": edit_epistemic
+                                "output_text": edit_output.strip(),                                "epistemic_status": edit_epistemic
                             }, step["id"]), "ویرایش مرحله انجام نشد.")
                             if result is not None:
                                 db_call(lambda: touch_session(sid), "زمان آخرین فعالیت جلسه به‌روزرسانی نشد.")
@@ -337,7 +343,7 @@ with tab_work:
 
             st.markdown("### ثبت مرحله شناختی")
             with st.form("new_step_form", clear_on_submit=True):
-                role = st.selectbox("نقش مرحله", ROLES)
+                role = st.selectbox("نقش مرحله", ROLES, index=ROLES.index(workflow_state["next_role"]) if workflow_state["next_role"] in ROLES else 0)
                 step_input = st.text_area("ورودی یا دستور کار", height=80)
                 output = st.text_area("خروجی / تحلیل", height=160)
                 epistemic_status = st.selectbox("وضعیت معرفتی", EPISTEMIC)
