@@ -10,7 +10,7 @@ from supabase import create_client
 logger = logging.getLogger("beyond_cognition")
 st.set_page_config(page_title="فراتر از شناخت", page_icon="🧠", layout="wide")
 
-APP_VERSION = "0.4.3"
+APP_VERSION = "0.4.4"
 PAGE_SIZE = 500
 TABLES = ("research_sessions", "research_steps", "research_evidence", "model_runs", "research_records")
 ROLES = ["صورت‌بندی مسئله", "تحلیل‌گر", "فرضیه‌ساز", "منتقد", "ارزیاب شواهد", "ترکیب‌کننده", "یادداشت پژوهشگر"]
@@ -38,7 +38,7 @@ def fetch_rows(table, order="created_at", desc=True, limit=None):
         if page_size <= 0:
             break
         result = (
-            db.table(table).select("*").order(order, desc=desc)
+            db.table(table).select("*").order(order, desc=desc).order("id")
             .range(offset, offset + page_size - 1).execute()
         )
         batch = result.data or []
@@ -238,6 +238,16 @@ with tab_work:
                         evidence_by_step.setdefault(evidence["step_id"], []).append(evidence)
 
             total_evidence = sum(len(v) for v in evidence_by_step.values())
+            completed_roles = {step.get("role") for step in steps}
+            required_roles = ROLES[:6]
+            completed_count = sum(role in completed_roles for role in required_roles)
+            missing_roles = [role for role in required_roles if role not in completed_roles]
+            st.markdown("### پیشرفت گردش‌کار")
+            st.progress(completed_count / len(required_roles))
+            if missing_roles:
+                st.caption("نقش‌های ثبت‌نشده: " + "، ".join(missing_roles))
+            else:
+                st.success("هر شش نقش اصلی گردش‌کار ثبت شده‌اند؛ کیفیت شواهد و استدلال‌ها همچنان باید ارزیابی شود.")
             k = st.columns(3)
             k[0].metric("مراحل ثبت‌شده", len(steps))
             k[1].metric("شواهد پیوست‌شده", total_evidence)
