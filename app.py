@@ -10,6 +10,7 @@ from supabase import create_client
 from workflow import summarize_workflow
 from model_registry import PROVIDERS, configured_providers
 from provider_adapters import ModelProviderError, generate_model_response
+from workflow_agents import AGENT_SEQUENCE, build_agent_messages
 
 logger = logging.getLogger("beyond_cognition")
 st.set_page_config(page_title="فراتر از شناخت", page_icon="🧠", layout="wide")
@@ -42,7 +43,7 @@ def require_app_password():
 
 require_app_password()
 
-APP_VERSION = "0.5.0"
+APP_VERSION = "0.6.0"
 PAGE_SIZE = 500
 TABLES = ("research_sessions", "research_steps", "research_evidence", "model_runs", "research_records")
 ROLES = ["صورت‌بندی مسئله", "تحلیل‌گر", "فرضیه‌ساز", "منتقد", "ارزیاب شواهد", "ترکیب‌کننده", "یادداشت پژوهشگر"]
@@ -430,125 +431,207 @@ with tab_work:
             else:
                 st.caption("ابتدا یک مرحله ثبت کن تا بتوانی شاهدی به آن پیوست کنی.")
 
-            st.markdown("### اجرای مستقیم مدل از داخل سامانه")
+            st.markdown("### اتصال و آزمایش ارائه‌دهنده مدل")
             available_providers = configured_providers(st.secrets)
             if not available_providers:
-                st.info(
-                    "هنوز هیچ ارائه‌دهنده‌ای پیکربندی نشده است. برای فعال‌سازی، "
-                    "کلید یکی از سرویس‌ها را فقط در Streamlit Secrets وارد کن؛ "
-                    "نام کلیدها در README آمده است."
+                st.warning(
+                    "هیچ کلید ارائه‌دهنده‌ای در زمان اجرای برنامه شناسایی نشد. "
+                    "نام کلید را در Streamlit Secrets بررسی کن."
                 )
             else:
-                with st.form("provider_model_form", clear_on_submit=False):
-                    selected_provider = st.selectbox(
-                        "ارائه‌دهنده مدل",
-                        available_providers,
-                        format_func=lambda value: PROVIDERS[value]["label"],
-                    )
-                    model_id = st.text_input(
-                        "شناسه دقیق مدل",
-                        placeholder="شناسه مدل را از پنل همان ارائه‌دهنده وارد کن",
-                    )
-                    model_task_role = st.selectbox("نقش پژوهشی", ROLES)
-                    model_prompt = st.text_area(
-                        "پرسش یا دستور پژوهشی",
-                        height=150,
-                        placeholder="پرسش را دقیق، محدود و قابل بررسی بنویس.",
-                    )
-                    model_temperature = st.slider(
-                        "تنوع پاسخ (Temperature)", 0.0, 2.0, 0.3, 0.1
-                    )
-                    model_max_tokens = st.slider(
-                        "حداکثر توکن خروجی", 64, 8192, 2048, 64
-                    )
-                    execute_model = st.form_submit_button(
-                        "ارسال به مدل و ثبت نتیجه",
-                        type="primary",
-                        use_container_width=True,
-                    )
-                if execute_model:
-                    if not model_id.strip() or not model_prompt.strip():
-                        st.warning("شناسه مدل و متن پرسش الزامی است.")
+                provider_labels = {
+                    value: PROVIDERS[value]["label"] for value in available_providers
+                }
+                selected_provider = st.selectbox(
+                    "ارائه‌دهنده",
+                    available_providers,
+                    format_func=lambda value: provider_labels[value],
+                    key="active_model_provider",
+                )
+                st.success(
+                    "کلید " + PROVIDERS[selected_provider]["secret_name"]
+                    + " از Secrets شناسایی شد؛ مقدار کلید نمایش داده نمی‌شود."
+                )
+                model_id = st.text_input(
+                    "شناسه مدل",
+                    value="openrouter/free" if selected_provider == "openrouter" else "",
+                    placeholder="شناسه دقیق مدل در کاتالوگ ارائه‌دهنده",
+                    key="active_model_id",
+                )
+                api_key = str(
+                    st.secrets.get(PROVIDERS[selected_provider]["secret_name"], "")
+                ).strip()
+
+                if st.button("آزمایش واقعی اتصال", key="test_model_connection"):
+                    if not model_id.strip():
+                        st.warning("شناسه مدل را وارد کن.")
                     else:
-                        system_prompt = (
-                            "تو یک عامل پژوهشی در سامانه فراتر از شناخت هستی. "
-                            "ادعاها را از شواهد جدا کن؛ واقعیت مستند، استنباط منطقی، "
-                            "فرضیه آزمون‌پذیر، گمانه فلسفی و مجهول را با هم خلط نکن. "
-                            "برای هر ادعای بیرونی منبع قابل بررسی لازم است. "
-                            "منبع، داده، آزمایش یا نقل‌قول جعل نکن. "
-                            "اگر اطلاعات کافی نداری، صریحاً محدودیت را بیان کن "
-                            "و شواهد مخالف یا توضیح‌های رقیب را نیز بررسی کن."
-                        )
-                        full_prompt = (
-                            "دستور سامانه:\n" + system_prompt
-                            + "\n\nپرسش پژوهشگر:\n" + model_prompt.strip()
-                        )
-                        api_key = str(
-                            st.secrets.get(PROVIDERS[selected_provider]["secret_name"], "")
-                        ).strip()
-                        with st.spinner("در حال ارتباط با ارائه‌دهنده مدل..."):
+                        with st.spinner("در حال ارسال درخواست آزمایشی..."):
                             try:
-                                model_result = generate_model_response(
+                                connection_test = generate_model_response(
                                     provider=selected_provider,
                                     model=model_id.strip(),
                                     messages=[
-                                        {"role": "system", "content": system_prompt},
-                                        {"role": "user", "content": model_prompt.strip()},
+                                        {
+                                            "role": "system",
+                                            "content": "Reply with exactly CONNECTION_OK and nothing else.",
+                                        },
+                                        {
+                                            "role": "user",
+                                            "content": "Connection test. Reply exactly CONNECTION_OK.",
+                                        },
                                     ],
                                     api_key=api_key,
-                                    temperature=model_temperature,
-                                    max_output_tokens=model_max_tokens,
+                                    temperature=0,
+                                    max_output_tokens=64,
+                                    timeout_seconds=45,
                                 )
                             except ModelProviderError as exc:
-                                save_failed = db_call(
-                                    lambda: insert_row("model_runs", {
-                                        "id": str(uuid.uuid4()),
-                                        "session_id": sid,
-                                        "provider": selected_provider,
-                                        "model_name": model_id.strip(),
-                                        "task_role": model_task_role,
-                                        "prompt": full_prompt,
-                                        "response": str(exc),
-                                        "status": "failed",
-                                    }),
-                                    "ثبت خطای اجرای مدل ناموفق بود.",
-                                )
-                                if save_failed is not None:
-                                    db_call(lambda: touch_session(sid))
-                                st.error(str(exc))
+                                st.error("آزمایش اتصال ناموفق بود: " + str(exc))
                             else:
-                                saved_model_run = db_call(
-                                    lambda: insert_row("model_runs", {
-                                        "id": str(uuid.uuid4()),
-                                        "session_id": sid,
-                                        "provider": selected_provider,
-                                        "model_name": model_result.model,
-                                        "task_role": model_task_role,
-                                        "prompt": full_prompt,
-                                        "response": model_result.text,
-                                        "status": "completed",
-                                    }),
-                                    "پاسخ مدل دریافت شد، اما ذخیره آن در حافظه پژوهش ناموفق بود.",
+                                st.success(
+                                    "اتصال واقعی موفق است. مدل پاسخ داد: "
+                                    + connection_test.text[:200]
                                 )
-                                if saved_model_run is not None:
-                                    db_call(lambda: touch_session(sid))
-                                    st.success(
-                                        "پاسخ مدل دریافت و در حافظه پژوهش ثبت شد."
+                                st.caption(
+                                    f"مدل پاسخ‌دهنده: {connection_test.model} "
+                                    f"| زمان پاسخ: {connection_test.latency_ms} ms"
+                                )
+
+                st.divider()
+                st.markdown("### اجرای گردش‌کار شش‌مرحله‌ای پژوهش")
+                st.caption(
+                    "در این نسخه شش نقش به‌ترتیب با همین مدل اجرا می‌شوند؛ "
+                    "این گردش‌کار چندمرحله‌ای است، نه شش مدل مستقل. "
+                    "هر مرحله پس از دریافت پاسخ ذخیره می‌شود. در صورت خطا، "
+                    "مراحل موفق قبلی باقی می‌مانند و اجرا متوقف می‌شود."
+                )
+                with st.form("agent_pipeline_form"):
+                    pipeline_question = st.text_area(
+                        "پرسش مرکزی برای گردش‌کار",
+                        value=selected.get("central_question") or "",
+                        height=120,
+                        key="pipeline_central_question",
+                    )
+                    pipeline_temperature = st.slider(
+                        "تنوع پاسخ مراحل", 0.0, 1.0, 0.2, 0.1,
+                        key="pipeline_temperature",
+                    )
+                    pipeline_tokens = st.slider(
+                        "حداکثر توکن خروجی هر مرحله", 256, 4096, 1800, 256,
+                        key="pipeline_tokens",
+                    )
+                    run_pipeline = st.form_submit_button(
+                        "اجرای شش مرحله و ذخیره نتایج",
+                        type="primary",
+                        use_container_width=True,
+                    )
+
+                if run_pipeline:
+                    if not pipeline_question.strip():
+                        st.warning("پرسش مرکزی پژوهش خالی است.")
+                    elif not model_id.strip():
+                        st.warning("شناسه مدل را وارد کن.")
+                    else:
+                        previous_outputs = []
+                        next_sequence = max(
+                            (int(item.get("sequence_no", 0)) for item in steps),
+                            default=0,
+                        ) + 1
+                        completed_roles = []
+                        pipeline_failed = False
+                        for role in AGENT_SEQUENCE:
+                            stage_messages = build_agent_messages(
+                                role, pipeline_question, previous_outputs
+                            )
+                            stage_prompt = stage_messages[0]["content"] + (
+                                "\\n\\n" + stage_messages[1]["content"]
+                            )
+                            with st.spinner("در حال اجرای مرحله: " + role):
+                                try:
+                                    stage_result = generate_model_response(
+                                        provider=selected_provider,
+                                        model=model_id.strip(),
+                                        messages=stage_messages,
+                                        api_key=api_key,
+                                        temperature=pipeline_temperature,
+                                        max_output_tokens=pipeline_tokens,
+                                        timeout_seconds=90,
                                     )
-                                    st.markdown("**پاسخ مدل**")
-                                    st.write(model_result.text)
-                                    with st.expander("جزئیات اجرای مدل"):
-                                        st.caption(
-                                            f"ارائه‌دهنده: {PROVIDERS[selected_provider]['label']} "
-                                            f"| مدل: {model_result.model}"
-                                        )
-                                        st.caption(f"زمان پاسخ: {model_result.latency_ms} ms")
-                                        st.caption(
-                                            "مصرف توکن: "
-                                            + str(model_result.usage or "از سوی سرویس گزارش نشد")
-                                        )
-                                        if model_result.request_id:
-                                            st.caption("شناسه درخواست: " + model_result.request_id)
+                                except ModelProviderError as exc:
+                                    db_call(
+                                        lambda: insert_row("model_runs", {
+                                            "id": str(uuid.uuid4()),
+                                            "session_id": sid,
+                                            "provider": selected_provider,
+                                            "model_name": model_id.strip(),
+                                            "task_role": role,
+                                            "prompt": stage_prompt,
+                                            "response": str(exc),
+                                            "status": "failed",
+                                        }),
+                                        "ثبت گزارش خطای مرحله ناموفق بود.",
+                                    )
+                                    st.error("گردش‌کار در مرحله «" + role + "» متوقف شد: " + str(exc))
+                                    pipeline_failed = True
+                                    break
+
+                            saved_run = db_call(
+                                lambda: insert_row("model_runs", {
+                                    "id": str(uuid.uuid4()),
+                                    "session_id": sid,
+                                    "provider": selected_provider,
+                                    "model_name": stage_result.model,
+                                    "task_role": role,
+                                    "prompt": stage_prompt,
+                                    "response": stage_result.text,
+                                    "status": "completed",
+                                }),
+                                "ذخیره اجرای مدل ناموفق بود؛ گردش‌کار متوقف شد.",
+                            )
+                            if saved_run is None:
+                                pipeline_failed = True
+                                break
+
+                            saved_step = db_call(
+                                lambda: insert_row("research_steps", {
+                                    "id": str(uuid.uuid4()),
+                                    "session_id": sid,
+                                    "sequence_no": next_sequence,
+                                    "role": role,
+                                    "input_text": stage_prompt,
+                                    "output_text": stage_result.text,
+                                    "epistemic_status": "نامعلوم / بررسی‌نشده",
+                                }),
+                                "ذخیره مرحله پژوهش ناموفق بود؛ گردش‌کار متوقف شد.",
+                            )
+                            if saved_step is None:
+                                pipeline_failed = True
+                                break
+
+                            previous_outputs.append({
+                                "role": role,
+                                "output": stage_result.text,
+                            })
+                            completed_roles.append(role)
+                            next_sequence += 1
+                            st.success(
+                                f"مرحله {len(completed_roles)}/6 تکمیل شد: {role} "
+                                f"({stage_result.latency_ms} ms)"
+                            )
+
+                        db_call(lambda: touch_session(sid))
+                        if pipeline_failed:
+                            st.warning(
+                                "گردش‌کار به‌صورت ایمن متوقف شد. "
+                                f"{len(completed_roles)} مرحله موفق در حافظه ثبت شده است."
+                            )
+                        else:
+                            st.success(
+                                "هر شش مرحله اجرا و در حافظه پژوهش ثبت شدند. "
+                                "برچسب معرفتی خروجی‌ها عمداً «بررسی‌نشده» باقی مانده است."
+                            )
+                            st.rerun()
 
             st.markdown("### ثبت گزارش اجرای مدل یا عامل")
             st.caption("این فرم برای ثبت دستی اجراهایی است که بیرون از سامانه انجام شده‌اند.")
