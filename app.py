@@ -271,8 +271,9 @@ with tab_export:
             }
             st.download_button("دریافت نسخه پشتیبان", json.dumps(export_data, ensure_ascii=False, indent=2).encode("utf-8"),
                                file_name="beyond_cognition_backup.json", mime="application/json")
-        except Exception as exc:
-            st.exception(exc)
+        except Exception:
+            logger.exception("Backup export failed")
+            st.error("ساخت نسخه پشتیبان ناموفق بود. لطفاً دوباره تلاش کن.")
 
 st.divider()
 st.caption("Beyond Cognition · Research Core · Version 0.3.1")
