@@ -1,8 +1,12 @@
 import streamlit as st
 import json
 import uuid
+import logging
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 from supabase import create_client
+
+logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="فراتر از شناخت", page_icon="🧠", layout="wide")
 
@@ -11,13 +15,20 @@ st.set_page_config(page_title="فراتر از شناخت", page_icon="🧠", la
 def get_database():
     return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
-def db_call(fn):
+def db_call(fn, user_message="عملیات پایگاه داده ناموفق بود."):
     try:
         return fn()
-    except Exception as exc:
-        st.error("عملیات پایگاه داده ناموفق بود.")
-        st.exception(exc)
+    except Exception:
+        # Keep database details in server logs, not in the public interface.
+        logger.exception("Database operation failed")
+        st.error(user_message)
         return None
+
+def valid_source_url(value):
+    if not value.strip():
+        return True
+    parsed = urlparse(value.strip())
+    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
 
 def rows(table, order="created_at", desc=True):
     result = db.table(table).select("*").order(order, desc=desc).execute()
@@ -31,9 +42,9 @@ def update(table, payload, row_id):
 
 try:
     db = get_database()
-except Exception as exc:
-    st.error("اتصال به حافظه دائمی برقرار نشد.")
-    st.exception(exc)
+except Exception:
+    logger.exception("Database connection failed")
+    st.error("اتصال به حافظه دائمی برقرار نشد. تنظیمات اتصال را در بخش Secrets بررسی کن.")
     st.stop()
 
 st.title("🧠 فراتر از شناخت")
@@ -44,9 +55,9 @@ st.caption("اصل سامانه: هیچ مدل واحدی نباید سقف تو
 try:
     sessions = rows("research_sessions")
     legacy_records = rows("research_records")
-except Exception as exc:
-    st.error("خواندن داده‌ها با خطا روبه‌رو شد.")
-    st.exception(exc)
+except Exception:
+    logger.exception("Initial data load failed")
+    st.error("خواندن داده‌ها با خطا روبه‌رو شد. لطفاً کمی بعد دوباره تلاش کن.")
     st.stop()
 
 # ---------- Overview ----------
@@ -150,7 +161,7 @@ with tab_work:
             else:
                 result = db_call(lambda: insert("research_steps", {
                     "id": str(uuid.uuid4()), "session_id": sid,
-                    "sequence_no": len(steps) + 1, "role": role,
+                    "sequence_no": max((int(item.get("sequence_no", 0)) for item in steps), default=0) + 1, "role": role,
                     "input_text": step_input.strip(), "output_text": output.strip(),
                     "epistemic_status": epistemic_status
                 }))
@@ -158,12 +169,16 @@ with tab_work:
                     st.success("مرحله ثبت شد.")
                     st.rerun()
 
-        st.markdown("### افزودن شاهد به آخرین مرحله")
+        st.markdown("### افزودن شاهد به مرحله موردنظر")
         if not steps:
             st.caption("برای ثبت شاهد، ابتدا حداقل یک مرحله ایجاد کن.")
         else:
-            last_step = steps[-1]
-            st.caption(f'شاهد به مرحله {last_step["sequence_no"]} · {last_step["role"]} متصل می‌شود.')
+            step_options = {
+                f'{item["sequence_no"]}. {item["role"]} · {item["id"][:8]}': item
+                for item in steps
+            }
+            target_step_label = st.selectbox("مرحله مقصد شاهد", list(step_options.keys()))
+            target_step = step_options[target_step_label]
             with st.form("new_evidence"):
                 evidence_type = st.selectbox("نوع شاهد", ["منبع علمی", "سند رسمی", "داده تجربی", "مشاهده", "استدلال مخالف", "سایر"])
                 claim = st.text_area("ادعا یا نکته‌ای که شاهد پشتیبانی می‌کند", height=90)
@@ -175,9 +190,11 @@ with tab_work:
             if save_evidence:
                 if not claim.strip():
                     st.warning("متن شاهد الزامی است.")
+                elif not valid_source_url(source_url):
+                    st.warning("نشانی منبع باید با http:// یا https:// شروع شود.")
                 else:
                     result = db_call(lambda: insert("research_evidence", {
-                        "id": str(uuid.uuid4()), "step_id": last_step["id"],
+                        "id": str(uuid.uuid4()), "step_id": target_step["id"],
                         "evidence_type": evidence_type, "claim": claim.strip(),
                         "source_title": source_title.strip(), "source_url": source_url.strip(),
                         "reliability": reliability, "notes": notes.strip()
@@ -210,6 +227,24 @@ with tab_work:
                     st.success("گزارش اجرا ثبت شد.")
                     st.rerun()
 
+        st.markdown("### سابقه اجراهای ثبت‌شده")
+        run_result = db_call(
+            lambda: db.table("model_runs").select("*").eq("session_id", sid)
+            .order("created_at", desc=True).limit(30).execute()
+        )
+        saved_runs = run_result.data if run_result and run_result.data else []
+        if not saved_runs:
+            st.caption("برای این جلسه هنوز گزارشی از اجرای مدل ثبت نشده است.")
+        for run in saved_runs:
+            with st.expander(f'{run["provider"]} / {run["model_name"]} · {run["status"]}'):
+                st.caption(f'نقش: {run["task_role"]} | زمان: {str(run["created_at"])[:19]}')
+                if run.get("prompt"):
+                    st.markdown("**پرامپت**")
+                    st.text(run["prompt"])
+                if run.get("response"):
+                    st.markdown("**پاسخ**")
+                    st.write(run["response"])
+
 with tab_archive:
     st.subheader("حافظه پژوهشی نسخه قبلی")
     st.caption("اطلاعات قبلی حفظ شده‌اند و در این نسخه حذف یا تبدیل اجباری نشده‌اند.")
@@ -240,4 +275,4 @@ with tab_export:
             st.exception(exc)
 
 st.divider()
-st.caption("Beyond Cognition · Research Core · Version 0.3.0")
+st.caption("Beyond Cognition · Research Core · Version 0.3.1")
