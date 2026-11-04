@@ -545,7 +545,7 @@ with tab_work:
                                 role, pipeline_question, previous_outputs
                             )
                             stage_prompt = stage_messages[0]["content"] + (
-                                "\\n\\n" + stage_messages[1]["content"]
+                                "\n\n" + stage_messages[1]["content"]
                             )
                             with st.spinner("در حال اجرای مرحله: " + role):
                                 try:
