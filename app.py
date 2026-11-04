@@ -480,8 +480,8 @@ with tab_work:
                             "و شواهد مخالف یا توضیح‌های رقیب را نیز بررسی کن."
                         )
                         full_prompt = (
-                            "دستور سامانه:\\n" + system_prompt
-                            + "\\n\\nپرسش پژوهشگر:\\n" + model_prompt.strip()
+                            "دستور سامانه:\n" + system_prompt
+                            + "\n\nپرسش پژوهشگر:\n" + model_prompt.strip()
                         )
                         api_key = str(
                             st.secrets.get(PROVIDERS[selected_provider]["secret_name"], "")
