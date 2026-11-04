@@ -10,7 +10,8 @@ from supabase import create_client
 logger = logging.getLogger("beyond_cognition")
 st.set_page_config(page_title="فراتر از شناخت", page_icon="🧠", layout="wide")
 
-APP_VERSION = "0.4.0"
+APP_VERSION = "0.4.1"
+PAGE_SIZE = 500
 TABLES = ("research_sessions", "research_steps", "research_evidence", "model_runs", "research_records")
 ROLES = ["صورت‌بندی مسئله", "تحلیل‌گر", "فرضیه‌ساز", "منتقد", "ارزیاب شواهد", "ترکیب‌کننده", "یادداشت پژوهشگر"]
 EPISTEMIC = ["نامعلوم / بررسی‌نشده", "مستند", "استنباط منطقی", "فرضیه آزمون‌پذیر", "گمانه فلسفی", "ردشده"]
@@ -29,17 +30,34 @@ def db_call(fn, message="عملیات پایگاه داده ناموفق بود.
         return None
 
 def fetch_rows(table, order="created_at", desc=True, limit=None):
-    query = db.table(table).select("*").order(order, desc=desc)
-    if limit is not None:
-        query = query.limit(limit)
-    result = query.execute()
-    return result.data or []
+    """Read every row in bounded pages; one API response may be capped."""
+    rows = []
+    offset = 0
+    while True:
+        page_size = PAGE_SIZE if limit is None else min(PAGE_SIZE, limit - offset)
+        if page_size <= 0:
+            break
+        result = (
+            db.table(table).select("*").order(order, desc=desc)
+            .range(offset, offset + page_size - 1).execute()
+        )
+        batch = result.data or []
+        rows.extend(batch)
+        if len(batch) < page_size:
+            break
+        offset += len(batch)
+    return rows
 
 def insert_row(table, payload):
     return db.table(table).insert(payload).execute()
 
 def update_row(table, payload, row_id):
     return db.table(table).update(payload).eq("id", row_id).execute()
+
+def touch_session(session_id):
+    return db.table("research_sessions").update({
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }).eq("id", session_id).execute()
 
 def valid_source_url(value):
     value = (value or "").strip()
@@ -144,6 +162,16 @@ with tab_new:
 
 with tab_work:
     st.subheader("میز کار پژوهش")
+    with st.expander("الگوی پیشنهادی گردش‌کار پژوهش", expanded=False):
+        st.markdown(
+            "۱. **صورت‌بندی مسئله:** تعریف دقیق پرسش، دامنه و معیار پاسخ\\n"
+            "۲. **تحلیل‌گر:** تفکیک دانسته‌ها، مجهولات و پیش‌فرض‌ها\\n"
+            "۳. **فرضیه‌ساز:** ارائه چند توضیح یا پاسخ رقیب\\n"
+            "۴. **منتقد:** جست‌وجوی ایرادها، شواهد مخالف و مثال نقض\\n"
+            "۵. **ارزیاب شواهد:** سنجش کیفیت، استقلال و اعتبار منابع\\n"
+            "۶. **ترکیب‌کننده:** جمع‌بندی همراه با درجه اطمینان و پرسش‌های باز"
+        )
+        st.caption("این الگو راهنمای ثبت کار است؛ هنوز اجرای خودکار چندمدلی در سامانه فعال نیست.")
     if not sessions:
         st.info("ابتدا یک جلسه پژوهشی ایجاد کن.")
     else:
@@ -197,14 +225,17 @@ with tab_work:
             else:
                 steps = step_result.data or []
 
-            evidence_by_step = {}
-            for step in steps:
+            evidence_by_step = {step["id"]: [] for step in steps}
+            if steps:
+                step_ids = [step["id"] for step in steps]
                 ev_result = db_call(
-                    lambda step_id=step["id"]: db.table("research_evidence").select("*")
-                    .eq("step_id", step_id).order("created_at").execute(),
-                    "خواندن شواهد یک مرحله ناموفق بود."
+                    lambda: db.table("research_evidence").select("*")
+                    .in_("step_id", step_ids).order("created_at").execute(),
+                    "خواندن شواهد این جلسه ناموفق بود."
                 )
-                evidence_by_step[step["id"]] = ev_result.data if ev_result else []
+                if ev_result is not None:
+                    for evidence in (ev_result.data or []):
+                        evidence_by_step.setdefault(evidence["step_id"], []).append(evidence)
 
             total_evidence = sum(len(v) for v in evidence_by_step.values())
             k = st.columns(3)
@@ -254,6 +285,7 @@ with tab_work:
                                 "epistemic_status": edit_epistemic
                             }, step["id"]), "ویرایش مرحله انجام نشد.")
                             if result is not None:
+                                db_call(lambda: touch_session(sid), "زمان آخرین فعالیت جلسه به‌روزرسانی نشد.")
                                 st.success("مرحله ویرایش شد.")
                                 st.rerun()
 
@@ -275,6 +307,7 @@ with tab_work:
                         "output_text": output.strip(), "epistemic_status": epistemic_status
                     }), "ثبت مرحله ناموفق بود.")
                     if result is not None:
+                        db_call(lambda: touch_session(sid), "زمان آخرین فعالیت جلسه به‌روزرسانی نشد.")
                         st.success("مرحله ثبت شد.")
                         st.rerun()
 
@@ -307,6 +340,7 @@ with tab_work:
                             "reliability": reliability, "notes": notes.strip()
                         }), "ثبت شاهد ناموفق بود.")
                         if result is not None:
+                            db_call(lambda: touch_session(sid), "زمان آخرین فعالیت جلسه به‌روزرسانی نشد.")
                             st.success("شاهد ثبت شد.")
                             st.rerun()
             else:
@@ -333,6 +367,7 @@ with tab_work:
                         "response": response_text.strip(), "status": run_status
                     }), "ثبت گزارش اجرا ناموفق بود.")
                     if result is not None:
+                        db_call(lambda: touch_session(sid), "زمان آخرین فعالیت جلسه به‌روزرسانی نشد.")
                         st.success("گزارش اجرا ثبت شد.")
                         st.rerun()
 
@@ -378,7 +413,8 @@ with tab_archive:
 
 with tab_backup:
     st.subheader("پشتیبان‌گیری از حافظه پژوهشی")
-    st.write("نسخه پشتیبان شامل جلسات، مراحل، شواهد، گزارش اجراهای مدل و رکوردهای قدیمی است.")
+    st.write("نسخه پشتیبان شامل تمام صفحات جلسات، مراحل، شواهد، گزارش اجراهای مدل و رکوردهای قدیمی است.")
+    st.caption("دریافت به‌صورت صفحه‌بندی‌شده انجام می‌شود تا محدودیت تعداد رکورد در یک پاسخ باعث ناقص‌شدن خروجی نشود.")
     if st.button("آماده‌سازی نسخه پشتیبان", type="primary"):
         try:
             export_data = {
