@@ -1,199 +1,259 @@
 import streamlit as st
 import json
 import uuid
+from datetime import datetime, timezone
 from supabase import create_client
 
-st.set_page_config(
-    page_title="فراتر از شناخت",
-    page_icon="🧠",
-    layout="wide"
-)
+st.set_page_config(page_title="فراتر از شناخت", page_icon="🧠", layout="wide")
 
-
-# اتصال به پایگاه داده
+# ---------- Configuration ----------
 @st.cache_resource
 def get_database():
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
-    return create_client(url, key)
+    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
+def db_call(fn):
+    try:
+        return fn()
+    except Exception as exc:
+        st.error("عملیات پایگاه داده ناموفق بود.")
+        st.exception(exc)
+        return None
+
+def rows(table, order="created_at", desc=True):
+    result = db.table(table).select("*").order(order, desc=desc).execute()
+    return result.data or []
+
+def insert(table, payload):
+    return db.table(table).insert(payload).execute()
+
+def update(table, payload, row_id):
+    return db.table(table).update(payload).eq("id", row_id).execute()
+
+# Optional application gate. Configure APP_PASSWORD in Streamlit Secrets before sharing publicly.
+if "APP_PASSWORD" in st.secrets:
+    if not st.session_state.get("authenticated", False):
+        st.title("🧠 فراتر از شناخت")
+        entered = st.text_input("رمز ورود", type="password")
+        if st.button("ورود", type="primary"):
+            if entered == st.secrets["APP_PASSWORD"]:
+                st.session_state["authenticated"] = True
+                st.rerun()
+            else:
+                st.error("رمز ورود صحیح نیست.")
+        st.stop()
 
 try:
     db = get_database()
-    st.success("اتصال به حافظه دائمی برقرار است.")
-except Exception as e:
-    st.error("خطا در اتصال به پایگاه داده:")
-    st.code(str(e))
+except Exception as exc:
+    st.error("اتصال به حافظه دائمی برقرار نشد.")
+    st.exception(exc)
     st.stop()
 
-
-# دریافت اطلاعات
-def load_records():
-    result = (
-        db.table("research_records")
-        .select("*")
-        .order("created_at", desc=True)
-        .execute()
-    )
-    return result.data or []
-
-
-# ذخیره اطلاعات
-def save_record(record):
-    db.table("research_records").insert(record).execute()
-
-
-# عنوان سامانه
 st.title("🧠 فراتر از شناخت")
-st.caption(
-    "Beyond Cognition | Human–AI Research System"
+st.caption("Beyond Cognition | محیط عملیاتی مغز پژوهشی")
+st.caption("اصل سامانه: هیچ مدل واحدی نباید سقف توان کل سامانه باشد.")
+
+if "APP_PASSWORD" not in st.secrets:
+    st.warning("حفاظت ورود هنوز فعال نشده است. تا پیش از انتشار عمومی، مقدار APP_PASSWORD را در Streamlit Secrets تنظیم کن. کلید Supabase فقط باید در Secrets سمت سرور بماند.")
+
+# ---------- Load data ----------
+try:
+    sessions = rows("research_sessions")
+    legacy_records = rows("research_records")
+except Exception as exc:
+    st.error("خواندن داده‌ها با خطا روبه‌رو شد.")
+    st.exception(exc)
+    st.stop()
+
+# ---------- Overview ----------
+metric_cols = st.columns(4)
+metric_cols[0].metric("جلسات پژوهش", len(sessions))
+metric_cols[1].metric("یادداشت‌های قدیمی", len(legacy_records))
+metric_cols[2].metric("جلسات فعال", sum(s.get("status") == "active" for s in sessions))
+metric_cols[3].metric("جلسات تکمیل‌شده", sum(s.get("status") == "completed" for s in sessions))
+
+tab_home, tab_new, tab_work, tab_archive, tab_export = st.tabs(
+    ["نمای کلی", "پژوهش جدید", "میز کار پژوهش", "حافظه قبلی", "پشتیبان‌گیری"]
 )
 
-st.divider()
+with tab_home:
+    st.subheader("نمای کلی پژوهش‌ها")
+    if not sessions:
+        st.info("هنوز جلسه پژوهشی ایجاد نشده است. از بخش «پژوهش جدید» شروع کن.")
+    else:
+        for s in sessions[:20]:
+            with st.container(border=True):
+                c1, c2 = st.columns([4, 1])
+                c1.markdown("**" + s["title"] + "**")
+                c1.write(s["central_question"])
+                c2.caption("وضعیت: " + s["status"])
+                c2.caption(str(s["created_at"])[:10])
+    st.markdown("### قواعد ثبت شناختی")
+    st.markdown("- **مستند:** دارای منبع قابل بررسی\n- **استنباط منطقی:** نتیجه‌گیری از مقدمات مشخص\n- **فرضیه آزمون‌پذیر:** دارای راهی برای تأیید یا رد\n- **گمانه فلسفی:** ایده‌ای برای کاوش، نه واقعیت اثبات‌شده\n- **نامعلوم:** داده کافی در دست نیست")
 
-
-# خواندن حافظه
-try:
-    records = load_records()
-except Exception as e:
-    st.error("خطا در خواندن حافظه پژوهشی:")
-    st.code(str(e))
-    st.stop()
-
-
-# آمار سامانه
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    st.metric("تعداد پژوهش‌ها", len(records))
-
-with col2:
-    st.metric(
-        "فرضیه‌ها",
-        sum(r["kind"] == "فرضیه" for r in records)
-    )
-
-with col3:
-    st.metric(
-        "نتایج",
-        sum(r["kind"] == "نتیجه" for r in records)
-    )
-
-
-st.divider()
-
-
-# ثبت پژوهش
-st.subheader("ثبت پژوهش جدید")
-
-with st.form("research_form"):
-
-    title = st.text_input("عنوان پژوهش")
-
-    question = st.text_area(
-        "پرسش یا محتوای پژوهش",
-        height=130
-    )
-
-    kind = st.selectbox(
-        "نوع ثبت",
-        ["پرسش", "فرضیه", "تحلیل", "نتیجه", "نقد", "مشاهده"]
-    )
-
-    status = st.selectbox(
-        "وضعیت اعتبار",
-        [
-            "بررسی‌نشده",
-            "مستند",
-            "استنباط منطقی",
-            "فرضیه آزمون‌پذیر",
-            "گمانه فلسفی",
-            "ردشده"
-        ]
-    )
-
-    sources = st.text_area("منابع و شواهد")
-
-    submitted = st.form_submit_button(
-        "ذخیره در حافظه دائمی",
-        use_container_width=True
-    )
-
+with tab_new:
+    st.subheader("ایجاد جلسه پژوهشی")
+    with st.form("new_session"):
+        title = st.text_input("عنوان پژوهش", placeholder="مثلاً: آیا می‌توان همکاری چندمدلی را ارزیابی‌پذیر کرد؟")
+        question = st.text_area("پرسش مرکزی", height=130)
+        submitted = st.form_submit_button("ایجاد جلسه", type="primary", use_container_width=True)
     if submitted:
-
         if not title.strip() or not question.strip():
-            st.warning("عنوان و محتوا الزامی است.")
-
+            st.warning("عنوان و پرسش مرکزی الزامی است.")
         else:
-            record = {
-                "id": str(uuid.uuid4()),
-                "title": title.strip(),
-                "question": question.strip(),
-                "kind": kind,
-                "status": status,
-                "sources": sources.strip()
-            }
-
-            try:
-                save_record(record)
-                st.success("پژوهش ذخیره شد.")
+            result = db_call(lambda: insert("research_sessions", {
+                "id": str(uuid.uuid4()), "title": title.strip(),
+                "central_question": question.strip(), "status": "active"
+            }))
+            if result is not None:
+                st.success("جلسه پژوهشی ایجاد شد.")
                 st.rerun()
 
-            except Exception as e:
-                st.error("خطا در ذخیره پژوهش:")
-                st.code(str(e))
+with tab_work:
+    st.subheader("میز کار پژوهش")
+    if not sessions:
+        st.info("ابتدا یک جلسه پژوهشی بساز.")
+    else:
+        options = {f'{s["title"]} · {s["id"][:8]}': s for s in sessions}
+        selected_label = st.selectbox("انتخاب جلسه", list(options.keys()))
+        selected = options[selected_label]
+        sid = selected["id"]
+        st.markdown("### " + selected["title"])
+        st.write(selected["central_question"])
+        status_options = ["active", "paused", "completed"]
+        new_status = st.selectbox("وضعیت جلسه", status_options,
+                                  index=status_options.index(selected["status"]) if selected["status"] in status_options else 0)
+        if st.button("به‌روزرسانی وضعیت"):
+            result = db_call(lambda: update("research_sessions", {
+                "status": new_status, "updated_at": datetime.now(timezone.utc).isoformat()
+            }, sid))
+            if result is not None:
+                st.success("وضعیت به‌روزرسانی شد.")
+                st.rerun()
 
+        step_rows = db_call(lambda: db.table("research_steps").select("*").eq("session_id", sid).order("sequence_no").execute())
+        steps = step_rows.data if step_rows and step_rows.data else []
+        st.metric("تعداد مراحل ثبت‌شده", len(steps))
+        if steps:
+            for step in steps:
+                with st.expander(f'{step["sequence_no"]}. {step["role"]} · {step["epistemic_status"]}'):
+                    if step.get("input_text"):
+                        st.markdown("**ورودی / دستور کار**")
+                        st.write(step["input_text"])
+                    st.markdown("**خروجی ثبت‌شده**")
+                    st.write(step["output_text"])
+                    ev = db_call(lambda step_id=step["id"]: db.table("research_evidence").select("*").eq("step_id", step_id).order("created_at").execute())
+                    evidence = ev.data if ev and ev.data else []
+                    if evidence:
+                        st.markdown("**شواهد پیوست‌شده**")
+                        for item in evidence:
+                            st.write(f'- {item["evidence_type"]}: {item["claim"]}')
+                            if item.get("source_url"):
+                                st.markdown(f'  منبع: {item["source_url"]}')
+
+        st.markdown("### ثبت مرحله شناختی")
+        roles = ["صورت‌بندی مسئله", "تحلیل‌گر", "فرضیه‌ساز", "منتقد", "ارزیاب شواهد", "ترکیب‌کننده", "یادداشت پژوهشگر"]
+        epistemic = ["نامعلوم / بررسی‌نشده", "مستند", "استنباط منطقی", "فرضیه آزمون‌پذیر", "گمانه فلسفی", "ردشده"]
+        with st.form("new_step"):
+            role = st.selectbox("نقش مرحله", roles)
+            step_input = st.text_area("ورودی یا دستور کار", height=90)
+            output = st.text_area("خروجی / تحلیل", height=180)
+            epistemic_status = st.selectbox("وضعیت معرفتی", epistemic)
+            save_step = st.form_submit_button("ثبت مرحله", type="primary", use_container_width=True)
+        if save_step:
+            if not output.strip():
+                st.warning("خروجی مرحله را وارد کن.")
+            else:
+                result = db_call(lambda: insert("research_steps", {
+                    "id": str(uuid.uuid4()), "session_id": sid,
+                    "sequence_no": len(steps) + 1, "role": role,
+                    "input_text": step_input.strip(), "output_text": output.strip(),
+                    "epistemic_status": epistemic_status
+                }))
+                if result is not None:
+                    st.success("مرحله ثبت شد.")
+                    st.rerun()
+
+        st.markdown("### افزودن شاهد به آخرین مرحله")
+        if not steps:
+            st.caption("برای ثبت شاهد، ابتدا حداقل یک مرحله ایجاد کن.")
+        else:
+            last_step = steps[-1]
+            st.caption(f'شاهد به مرحله {last_step["sequence_no"]} · {last_step["role"]} متصل می‌شود.')
+            with st.form("new_evidence"):
+                evidence_type = st.selectbox("نوع شاهد", ["منبع علمی", "سند رسمی", "داده تجربی", "مشاهده", "استدلال مخالف", "سایر"])
+                claim = st.text_area("ادعا یا نکته‌ای که شاهد پشتیبانی می‌کند", height=90)
+                source_title = st.text_input("عنوان منبع")
+                source_url = st.text_input("نشانی منبع (در صورت وجود)")
+                reliability = st.selectbox("ارزیابی اولیه اعتبار", ["ارزیابی‌نشده", "بالا", "متوسط", "پایین", "متعارض"])
+                notes = st.text_area("یادداشت")
+                save_evidence = st.form_submit_button("ثبت شاهد")
+            if save_evidence:
+                if not claim.strip():
+                    st.warning("متن شاهد الزامی است.")
+                else:
+                    result = db_call(lambda: insert("research_evidence", {
+                        "id": str(uuid.uuid4()), "step_id": last_step["id"],
+                        "evidence_type": evidence_type, "claim": claim.strip(),
+                        "source_title": source_title.strip(), "source_url": source_url.strip(),
+                        "reliability": reliability, "notes": notes.strip()
+                    }))
+                    if result is not None:
+                        st.success("شاهد ثبت شد.")
+                        st.rerun()
+
+        st.markdown("### ثبت اجرای مدل یا عامل بیرونی")
+        st.caption("این بخش فعلاً گزارش اجرای واقعی مدل را ثبت می‌کند؛ هنوز هیچ API مدل خارجی به سامانه متصل نشده است.")
+        with st.form("model_run"):
+            provider = st.text_input("ارائه‌دهنده", placeholder="مثلاً OpenAI / Anthropic / مدل محلی")
+            model_name = st.text_input("نام دقیق مدل")
+            task_role = st.selectbox("نقش اجرا", roles)
+            prompt = st.text_area("پرامپت ارسال‌شده")
+            response_text = st.text_area("پاسخ دریافت‌شده")
+            run_status = st.selectbox("وضعیت اجرا", ["completed", "failed", "manual_record"])
+            save_run = st.form_submit_button("ثبت گزارش اجرا")
+        if save_run:
+            if not provider.strip() or not model_name.strip():
+                st.warning("ارائه‌دهنده و نام مدل الزامی است.")
+            else:
+                result = db_call(lambda: insert("model_runs", {
+                    "id": str(uuid.uuid4()), "session_id": sid,
+                    "provider": provider.strip(), "model_name": model_name.strip(),
+                    "task_role": task_role, "prompt": prompt.strip(),
+                    "response": response_text.strip(), "status": run_status
+                }))
+                if result is not None:
+                    st.success("گزارش اجرا ثبت شد.")
+                    st.rerun()
+
+with tab_archive:
+    st.subheader("حافظه پژوهشی نسخه قبلی")
+    st.caption("اطلاعات قبلی حفظ شده‌اند و در این نسخه حذف یا تبدیل اجباری نشده‌اند.")
+    if not legacy_records:
+        st.info("رکورد قدیمی‌ای وجود ندارد.")
+    for record in legacy_records:
+        with st.expander(f'{record.get("kind", "ثبت")} | {record.get("title", "بدون عنوان")}'):
+            st.write(record.get("question", ""))
+            st.caption("وضعیت: " + str(record.get("status", "")))
+            if record.get("sources"):
+                st.write("منابع: " + record["sources"])
+
+with tab_export:
+    st.subheader("پشتیبان‌گیری از حافظه پژوهشی")
+    if st.button("ساخت فایل پشتیبان JSON", type="primary"):
+        try:
+            export_data = {
+                "exported_at": datetime.now(timezone.utc).isoformat(),
+                "sessions": rows("research_sessions"),
+                "steps": rows("research_steps"),
+                "evidence": rows("research_evidence"),
+                "model_runs": rows("model_runs"),
+                "legacy_records": rows("research_records")
+            }
+            st.download_button("دریافت نسخه پشتیبان", json.dumps(export_data, ensure_ascii=False, indent=2).encode("utf-8"),
+                               file_name="beyond_cognition_backup.json", mime="application/json")
+        except Exception as exc:
+            st.exception(exc)
 
 st.divider()
-
-
-# نمایش حافظه پژوهشی
-st.subheader("📚 حافظه پژوهشی")
-
-if not records:
-    st.info("هنوز پژوهشی ثبت نشده است.")
-
-for record in records:
-
-    with st.expander(
-        str(record["kind"]) + " | " + str(record["title"])
-    ):
-
-        st.write("**محتوا:**")
-        st.write(record["question"])
-
-        st.write("**وضعیت:**", record["status"])
-
-        if record.get("sources"):
-            st.write("**منابع:**")
-            st.write(record["sources"])
-
-        st.caption("شناسه: " + str(record["id"]))
-
-
-st.divider()
-
-
-# پشتیبان‌گیری
-st.subheader("مدیریت حافظه")
-
-backup = json.dumps(
-    records,
-    ensure_ascii=False,
-    indent=2
-)
-
-st.download_button(
-    "دریافت نسخه پشتیبان JSON",
-    data=backup.encode("utf-8"),
-    file_name="beyond_cognition_backup.json",
-    mime="application/json",
-    use_container_width=True
-)
-
-
-st.divider()
-
-st.caption(
-    "Beyond Cognition | Persistent Research Core | Version 0.2.1"
-)
+st.caption("Beyond Cognition · Research Core · Version 0.3.0")
