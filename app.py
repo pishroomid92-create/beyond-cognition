@@ -147,7 +147,8 @@ with tab_new:
     with st.form("create_session_form", clear_on_submit=True):
         title = st.text_input("عنوان پژوهش", placeholder="عنوان کوتاه و مشخص")
         question = st.text_area("پرسش مرکزی", height=130,
-                                placeholder="دقیقاً چه چیزی را می‌خواهیم بررسی کنیم؟")        create = st.form_submit_button("ایجاد جلسه", type="primary", use_container_width=True)
+                                placeholder="دقیقاً چه چیزی را می‌خواهیم بررسی کنیم؟")
+        create = st.form_submit_button("ایجاد جلسه", type="primary", use_container_width=True)
     if create:
         if not title.strip() or not question.strip():
             st.warning("عنوان و پرسش مرکزی هر دو الزامی‌اند.")
