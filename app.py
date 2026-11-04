@@ -29,19 +29,6 @@ def insert(table, payload):
 def update(table, payload, row_id):
     return db.table(table).update(payload).eq("id", row_id).execute()
 
-# Optional application gate. Configure APP_PASSWORD in Streamlit Secrets before sharing publicly.
-if "APP_PASSWORD" in st.secrets:
-    if not st.session_state.get("authenticated", False):
-        st.title("🧠 فراتر از شناخت")
-        entered = st.text_input("رمز ورود", type="password")
-        if st.button("ورود", type="primary"):
-            if entered == st.secrets["APP_PASSWORD"]:
-                st.session_state["authenticated"] = True
-                st.rerun()
-            else:
-                st.error("رمز ورود صحیح نیست.")
-        st.stop()
-
 try:
     db = get_database()
 except Exception as exc:
@@ -52,9 +39,6 @@ except Exception as exc:
 st.title("🧠 فراتر از شناخت")
 st.caption("Beyond Cognition | محیط عملیاتی مغز پژوهشی")
 st.caption("اصل سامانه: هیچ مدل واحدی نباید سقف توان کل سامانه باشد.")
-
-if "APP_PASSWORD" not in st.secrets:
-    st.warning("حفاظت ورود هنوز فعال نشده است. تا پیش از انتشار عمومی، مقدار APP_PASSWORD را در Streamlit Secrets تنظیم کن. کلید Supabase فقط باید در Secrets سمت سرور بماند.")
 
 # ---------- Load data ----------
 try:
