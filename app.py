@@ -236,13 +236,13 @@ with tab_work:
                         if ev.get("notes"):
                             st.write(ev["notes"])
                     with st.form("edit_step_" + str(step["id"])):
-                            edit_role = st.selectbox("نقش", ROLES,
-                                index=ROLES.index(step["role"]) if step.get("role") in ROLES else 0)
-                            edit_input = st.text_area("ورودی", value=step.get("input_text") or "", height=80)
-                            edit_output = st.text_area("خروجی", value=step.get("output_text") or "", height=150)
-                            old_epistemic = step.get("epistemic_status")
-                            edit_epistemic = st.selectbox("وضعیت معرفتی", EPISTEMIC,
-                                index=EPISTEMIC.index(old_epistemic) if old_epistemic in EPISTEMIC else 0)
+                        edit_role = st.selectbox("نقش", ROLES,
+                            index=ROLES.index(step["role"]) if step.get("role") in ROLES else 0)
+                        edit_input = st.text_area("ورودی", value=step.get("input_text") or "", height=80)
+                        edit_output = st.text_area("خروجی", value=step.get("output_text") or "", height=150)
+                        old_epistemic = step.get("epistemic_status")
+                        edit_epistemic = st.selectbox("وضعیت معرفتی", EPISTEMIC,
+                            index=EPISTEMIC.index(old_epistemic) if old_epistemic in EPISTEMIC else 0)
                         save_step_edit = st.form_submit_button("ذخیره ویرایش مرحله")
                     if save_step_edit:
                         if not edit_output.strip():
