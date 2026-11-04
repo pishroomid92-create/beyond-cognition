@@ -44,5 +44,5 @@ def test_app_renders_without_database_secrets_or_runtime_errors(monkeypatch):
     assert not app.exception, [str(item.value) for item in app.exception]
     assert any("فراتر از شناخت" in item.value for item in app.title)
     rendered_text = " ".join(item.value for item in app.caption)
-    assert "0.4.4" in rendered_text
+    assert "0.4.5" in rendered_text
     assert len(app.tabs) == 5
