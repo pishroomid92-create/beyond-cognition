@@ -1,59 +1,199 @@
-if not isinstance(imported, list):
-                raise ValueError("ساختار فایل معتبر نیست.")
+import streamlit as st
+import json
+import uuid
+from supabase import create_client
 
-            existing_ids = {
-                str(r["id"]) for r in records
+st.set_page_config(
+    page_title="فراتر از شناخت",
+    page_icon="🧠",
+    layout="wide"
+)
+
+
+# اتصال به پایگاه داده
+@st.cache_resource
+def get_database():
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
+
+
+try:
+    db = get_database()
+    st.success("اتصال به حافظه دائمی برقرار است.")
+except Exception as e:
+    st.error("خطا در اتصال به پایگاه داده:")
+    st.code(str(e))
+    st.stop()
+
+
+# دریافت اطلاعات
+def load_records():
+    result = (
+        db.table("research_records")
+        .select("*")
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return result.data or []
+
+
+# ذخیره اطلاعات
+def save_record(record):
+    db.table("research_records").insert(record).execute()
+
+
+# عنوان سامانه
+st.title("🧠 فراتر از شناخت")
+st.caption(
+    "Beyond Cognition | Human–AI Research System"
+)
+
+st.divider()
+
+
+# خواندن حافظه
+try:
+    records = load_records()
+except Exception as e:
+    st.error("خطا در خواندن حافظه پژوهشی:")
+    st.code(str(e))
+    st.stop()
+
+
+# آمار سامانه
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.metric("تعداد پژوهش‌ها", len(records))
+
+with col2:
+    st.metric(
+        "فرضیه‌ها",
+        sum(r["kind"] == "فرضیه" for r in records)
+    )
+
+with col3:
+    st.metric(
+        "نتایج",
+        sum(r["kind"] == "نتیجه" for r in records)
+    )
+
+
+st.divider()
+
+
+# ثبت پژوهش
+st.subheader("ثبت پژوهش جدید")
+
+with st.form("research_form"):
+
+    title = st.text_input("عنوان پژوهش")
+
+    question = st.text_area(
+        "پرسش یا محتوای پژوهش",
+        height=130
+    )
+
+    kind = st.selectbox(
+        "نوع ثبت",
+        ["پرسش", "فرضیه", "تحلیل", "نتیجه", "نقد", "مشاهده"]
+    )
+
+    status = st.selectbox(
+        "وضعیت اعتبار",
+        [
+            "بررسی‌نشده",
+            "مستند",
+            "استنباط منطقی",
+            "فرضیه آزمون‌پذیر",
+            "گمانه فلسفی",
+            "ردشده"
+        ]
+    )
+
+    sources = st.text_area("منابع و شواهد")
+
+    submitted = st.form_submit_button(
+        "ذخیره در حافظه دائمی",
+        use_container_width=True
+    )
+
+    if submitted:
+
+        if not title.strip() or not question.strip():
+            st.warning("عنوان و محتوا الزامی است.")
+
+        else:
+            record = {
+                "id": str(uuid.uuid4()),
+                "title": title.strip(),
+                "question": question.strip(),
+                "kind": kind,
+                "status": status,
+                "sources": sources.strip()
             }
 
-            new_records = []
+            try:
+                save_record(record)
+                st.success("پژوهش ذخیره شد.")
+                st.rerun()
 
-            for item in imported:
-                required = [
-                    "id", "title", "question",
-                    "kind", "status", "sources"
-                ]
+            except Exception as e:
+                st.error("خطا در ذخیره پژوهش:")
+                st.code(str(e))
 
-                if not isinstance(item, dict):
-                    raise ValueError("رکورد نامعتبر است.")
 
-                if not all(k in item for k in required):
-                    raise ValueError("اطلاعات یک رکورد ناقص است.")
+st.divider()
 
-                record_id = str(uuid.UUID(str(item["id"])))
 
-                if record_id in existing_ids:
-                    continue
+# نمایش حافظه پژوهشی
+st.subheader("📚 حافظه پژوهشی")
 
-                new_record = {
-                    "id": record_id,
-                    "title": str(item["title"]),
-                    "question": str(item["question"]),
-                    "kind": str(item["kind"]),
-                    "status": str(item["status"]),
-                    "sources": str(item.get("sources", ""))
-                }
+if not records:
+    st.info("هنوز پژوهشی ثبت نشده است.")
 
-                if item.get("created_at"):
-                    new_record["created_at"] = item["created_at"]
+for record in records:
 
-                new_records.append(new_record)
-                existing_ids.add(record_id)
+    with st.expander(
+        str(record["kind"]) + " | " + str(record["title"])
+    ):
 
-            if new_records:
-                db.table("research_records").insert(
-                    new_records
-                ).execute()
+        st.write("**محتوا:**")
+        st.write(record["question"])
 
-            st.success(
-                f"{len(new_records)} رکورد بازیابی شد."
-            )
-            st.rerun()
+        st.write("**وضعیت:**", record["status"])
 
-        except Exception as error:
-            st.error(f"خطا در بازیابی اطلاعات: {error}")
+        if record.get("sources"):
+            st.write("**منابع:**")
+            st.write(record["sources"])
+
+        st.caption("شناسه: " + str(record["id"]))
+
+
+st.divider()
+
+
+# پشتیبان‌گیری
+st.subheader("مدیریت حافظه")
+
+backup = json.dumps(
+    records,
+    ensure_ascii=False,
+    indent=2
+)
+
+st.download_button(
+    "دریافت نسخه پشتیبان JSON",
+    data=backup.encode("utf-8"),
+    file_name="beyond_cognition_backup.json",
+    mime="application/json",
+    use_container_width=True
+)
+
 
 st.divider()
 
 st.caption(
-    "Beyond Cognition | Persistent Research Core | Version 0.2"
+    "Beyond Cognition | Persistent Research Core | Version 0.2.1"
 )
