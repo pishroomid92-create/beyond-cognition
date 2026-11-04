@@ -10,7 +10,7 @@ from supabase import create_client
 logger = logging.getLogger("beyond_cognition")
 st.set_page_config(page_title="فراتر از شناخت", page_icon="🧠", layout="wide")
 
-APP_VERSION = "0.4.2"
+APP_VERSION = "0.4.3"
 PAGE_SIZE = 500
 TABLES = ("research_sessions", "research_steps", "research_evidence", "model_runs", "research_records")
 ROLES = ["صورت‌بندی مسئله", "تحلیل‌گر", "فرضیه‌ساز", "منتقد", "ارزیاب شواهد", "ترکیب‌کننده", "یادداشت پژوهشگر"]
@@ -266,6 +266,42 @@ with tab_work:
                         st.caption("اعتبار اولیه: " + str(ev.get("reliability") or "ارزیابی‌نشده"))
                         if ev.get("notes"):
                             st.write(ev["notes"])
+                        with st.form("edit_evidence_" + str(ev["id"])):
+                            edited_type = st.selectbox(
+                                "نوع شاهد",
+                                ["منبع علمی", "سند رسمی", "داده تجربی", "مشاهده", "استدلال مخالف", "سایر"],
+                                index=["منبع علمی", "سند رسمی", "داده تجربی", "مشاهده", "استدلال مخالف", "سایر"].index(ev["evidence_type"])
+                                if ev.get("evidence_type") in ["منبع علمی", "سند رسمی", "داده تجربی", "مشاهده", "استدلال مخالف", "سایر"] else 0
+                            )
+                            edited_claim = st.text_area("متن شاهد", value=ev.get("claim") or "", height=70)
+                            edited_source_title = st.text_input("عنوان منبع", value=ev.get("source_title") or "")
+                            edited_source_url = st.text_input("نشانی منبع", value=ev.get("source_url") or "")
+                            reliability_options = ["ارزیابی‌نشده", "بالا", "متوسط", "پایین", "متعارض"]
+                            old_reliability = ev.get("reliability")
+                            edited_reliability = st.selectbox(
+                                "اعتبار اولیه", reliability_options,
+                                index=reliability_options.index(old_reliability) if old_reliability in reliability_options else 0
+                            )
+                            edited_notes = st.text_area("یادداشت", value=ev.get("notes") or "", height=60)
+                            save_evidence_edit = st.form_submit_button("ذخیره ویرایش شاهد")
+                        if save_evidence_edit:
+                            if not edited_claim.strip():
+                                st.warning("متن شاهد نمی‌تواند خالی باشد.")
+                            elif not valid_source_url(edited_source_url):
+                                st.warning("نشانی منبع باید با http یا https شروع شود.")
+                            else:
+                                result = db_call(lambda: update_row("research_evidence", {
+                                    "evidence_type": edited_type,
+                                    "claim": edited_claim.strip(),
+                                    "source_title": edited_source_title.strip(),
+                                    "source_url": edited_source_url.strip(),
+                                    "reliability": edited_reliability,
+                                    "notes": edited_notes.strip()
+                                }, ev["id"]), "ویرایش شاهد ناموفق بود.")
+                                if result is not None:
+                                    db_call(lambda: touch_session(sid), "زمان آخرین فعالیت جلسه به‌روزرسانی نشد.")
+                                    st.success("شاهد ویرایش شد.")
+                                    st.rerun()
                     with st.form("edit_step_" + str(step["id"])):
                         edit_role = st.selectbox("نقش", ROLES,
                             index=ROLES.index(step["role"]) if step.get("role") in ROLES else 0)
