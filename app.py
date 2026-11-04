@@ -1,3 +1,4 @@
+import hmac
 import json
 import logging
 import uuid
@@ -10,6 +11,34 @@ from workflow import summarize_workflow
 
 logger = logging.getLogger("beyond_cognition")
 st.set_page_config(page_title="فراتر از شناخت", page_icon="🧠", layout="wide")
+
+def require_app_password():
+    configured_password = str(st.secrets.get("APP_PASSWORD", "")).strip()
+    if not configured_password:
+        st.error("قفل ورود فعال نشده است. مدیر برنامه باید APP_PASSWORD را در Streamlit Secrets تنظیم کند.")
+        st.stop()
+
+    if st.session_state.get("authenticated", False):
+        if st.sidebar.button("خروج از حساب"):
+            st.session_state["authenticated"] = False
+            st.rerun()
+        return
+
+    st.title("🔐 ورود به فراتر از شناخت")
+    with st.form("app_password_form"):
+        entered_password = st.text_input("رمز ورود", type="password")
+        submitted = st.form_submit_button("ورود", type="primary", use_container_width=True)
+
+    if submitted:
+        if hmac.compare_digest(entered_password, configured_password):
+            st.session_state["authenticated"] = True
+            st.rerun()
+        else:
+            st.error("رمز ورود صحیح نیست.")
+    st.stop()
+
+
+require_app_password()
 
 APP_VERSION = "0.4.5"
 PAGE_SIZE = 500
