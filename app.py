@@ -231,12 +231,11 @@ with tab_work:
                         if ev.get("source_title"):
                             st.caption("منبع: " + ev["source_title"])
                         if ev.get("source_url"):
-                            st.markdown("[مشاهده منبع](" + ev["source_url"] + ")")
+                            st.write("نشانی منبع:", ev["source_url"])
                         st.caption("اعتبار اولیه: " + str(ev.get("reliability") or "ارزیابی‌نشده"))
                         if ev.get("notes"):
                             st.write(ev["notes"])
-                    with st.expander("ویرایش این مرحله"):
-                        with st.form("edit_step_" + str(step["id"])):
+                    with st.form("edit_step_" + str(step["id"])):
                             edit_role = st.selectbox("نقش", ROLES,
                                 index=ROLES.index(step["role"]) if step.get("role") in ROLES else 0)
                             edit_input = st.text_area("ورودی", value=step.get("input_text") or "", height=80)
@@ -244,19 +243,19 @@ with tab_work:
                             old_epistemic = step.get("epistemic_status")
                             edit_epistemic = st.selectbox("وضعیت معرفتی", EPISTEMIC,
                                 index=EPISTEMIC.index(old_epistemic) if old_epistemic in EPISTEMIC else 0)
-                            save_step_edit = st.form_submit_button("ذخیره ویرایش مرحله")
-                        if save_step_edit:
-                            if not edit_output.strip():
-                                st.warning("خروجی مرحله نمی‌تواند خالی باشد.")
-                            else:
-                                result = db_call(lambda: update_row("research_steps", {
-                                    "role": edit_role, "input_text": edit_input.strip(),
-                                    "output_text": edit_output.strip(),
-                                    "epistemic_status": edit_epistemic
-                                }, step["id"]), "ویرایش مرحله انجام نشد.")
-                                if result is not None:
-                                    st.success("مرحله ویرایش شد.")
-                                    st.rerun()
+                        save_step_edit = st.form_submit_button("ذخیره ویرایش مرحله")
+                    if save_step_edit:
+                        if not edit_output.strip():
+                            st.warning("خروجی مرحله نمی‌تواند خالی باشد.")
+                        else:
+                            result = db_call(lambda: update_row("research_steps", {
+                                "role": edit_role, "input_text": edit_input.strip(),
+                                "output_text": edit_output.strip(),
+                                "epistemic_status": edit_epistemic
+                            }, step["id"]), "ویرایش مرحله انجام نشد.")
+                            if result is not None:
+                                st.success("مرحله ویرایش شد.")
+                                st.rerun()
 
             st.markdown("### ثبت مرحله شناختی")
             with st.form("new_step_form", clear_on_submit=True):
