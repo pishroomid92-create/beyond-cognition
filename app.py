@@ -43,7 +43,7 @@ def require_app_password():
 
 require_app_password()
 
-APP_VERSION = "0.6.0"
+APP_VERSION = "0.7.0"
 PAGE_SIZE = 500
 TABLES = ("research_sessions", "research_steps", "research_evidence", "model_runs", "research_records")
 ROLES = ["صورت‌بندی مسئله", "تحلیل‌گر", "فرضیه‌ساز", "منتقد", "ارزیاب شواهد", "ترکیب‌کننده", "یادداشت پژوهشگر"]
@@ -138,8 +138,8 @@ m[1].metric("فعال", active_count)
 m[2].metric("متوقف", paused_count)
 m[3].metric("تکمیل‌شده", completed_count)
 
-tab_home, tab_new, tab_work, tab_archive, tab_backup = st.tabs(
-    ["نمای کلی", "پژوهش جدید", "میز کار پژوهش", "حافظه قبلی", "پشتیبان‌گیری"]
+tab_home, tab_new, tab_work, tab_map, tab_archive, tab_backup = st.tabs(
+    ["نمای کلی", "پژوهش جدید", "میز کار پژوهش", "نقشه شناختی", "حافظه قبلی", "پشتیبان‌گیری"]
 )
 
 with tab_home:
@@ -676,6 +676,163 @@ with tab_work:
                     if run.get("response"):
                         st.markdown("**پاسخ**")
                         st.write(run["response"])
+
+with tab_map:
+    st.subheader("نقشه شناختی پژوهش")
+    st.caption("نمای درختی از پرسش مرکزی، عامل‌های پژوهشی، مراحل ثبت‌شده و شواهد. همه تغییرات در حافظه اصلی ذخیره می‌شوند.")
+    if not sessions:
+        st.info("ابتدا یک جلسه پژوهشی ایجاد کن.")
+    else:
+        map_options = {
+            f'{item.get("title", "بدون عنوان")} · {str(item.get("id", ""))[:8]}': item
+            for item in sessions
+        }
+        map_label = st.selectbox("جلسه موردنظر برای نمایش نقشه", list(map_options.keys()), key="cognitive_map_session")
+        map_session = map_options[map_label]
+        map_sid = map_session["id"]
+        map_steps_result = db_call(
+            lambda: db.table("research_steps").select("*").eq("session_id", map_sid)
+            .order("sequence_no").execute(),
+            "خواندن مراحل برای نقشه شناختی ناموفق بود."
+        )
+        map_steps = map_steps_result.data if map_steps_result else []
+        map_step_ids = [item["id"] for item in map_steps]
+        map_evidence_result = None
+        if map_step_ids:
+            map_evidence_result = db_call(
+                lambda: db.table("research_evidence").select("*").in_("step_id", map_step_ids)
+                .order("created_at").execute(),
+                "خواندن شواهد برای نقشه شناختی ناموفق بود."
+            )
+        map_evidence = map_evidence_result.data if map_evidence_result else []
+        evidence_by_map_step = {item["id"]: [] for item in map_steps}
+        for evidence_item in map_evidence:
+            evidence_by_map_step.setdefault(evidence_item["step_id"], []).append(evidence_item)
+
+        from cognitive_map import build_research_tree_dot
+        st.graphviz_chart(
+            build_research_tree_dot(map_session, map_steps, evidence_by_map_step),
+            use_container_width=True,
+        )
+        map_metrics = st.columns(3)
+        map_metrics[0].metric("عامل‌ها و مراحل", len(map_steps))
+        map_metrics[1].metric("شواهد", len(map_evidence))
+        map_metrics[2].metric("وضعیت جلسه", str(map_session.get("status") or "نامشخص"))
+        st.caption("برای ویرایش یک گره، آن را از فهرست زیر انتخاب کن. نمودار، ساختار داده‌ها را نمایش می‌دهد؛ انتخاب و ویرایش از پنل انجام می‌شود.")
+
+        if map_steps:
+            map_step_options = {
+                f'{int(item.get("sequence_no", 0)):02d} · {item.get("role", "بدون نقش")} · {str(item.get("id"))[:8]}': item
+                for item in map_steps
+            }
+            map_selected_label = st.selectbox(
+                "انتخاب گره برای مشاهده و ویرایش",
+                list(map_step_options.keys()),
+                key="cognitive_map_selected_step",
+            )
+            map_selected_step = map_step_options[map_selected_label]
+            map_left, map_right = st.columns([3, 2])
+            with map_left:
+                st.markdown("#### محتوای گره انتخاب‌شده")
+                st.markdown("**ورودی / دستور کار**")
+                st.write(map_selected_step.get("input_text") or "ثبت نشده")
+                st.markdown("**خروجی**")
+                st.write(map_selected_step.get("output_text") or "ثبت نشده")
+                st.caption("وضعیت معرفتی: " + str(map_selected_step.get("epistemic_status") or "نامعلوم / بررسی‌نشده"))
+                st.markdown("#### شواهد متصل")
+                selected_evidence = evidence_by_map_step.get(map_selected_step["id"], [])
+                if not selected_evidence:
+                    st.caption("هنوز شاهدی به این گره متصل نشده است.")
+                for evidence_item in selected_evidence:
+                    with st.expander(str(evidence_item.get("evidence_type") or "شاهد") + " · " + str(evidence_item.get("source_title") or "بدون عنوان")):
+                        st.write(evidence_item.get("claim") or "")
+                        if evidence_item.get("source_url"):
+                            st.markdown("[" + str(evidence_item.get("source_url")) + "](" + str(evidence_item.get("source_url")) + ")")
+                        st.caption("اعتبار: " + str(evidence_item.get("reliability") or "ارزیابی‌نشده"))
+            with map_right:
+                with st.form("cognitive_map_edit_step"):
+                    st.markdown("#### ویرایش گره")
+                    map_role = st.selectbox(
+                        "نقش عامل",
+                        ROLES,
+                        index=ROLES.index(map_selected_step.get("role")) if map_selected_step.get("role") in ROLES else 0,
+                    )
+                    map_input = st.text_area("ورودی / دستور کار", value=map_selected_step.get("input_text") or "", height=110)
+                    map_output = st.text_area("خروجی / یادداشت", value=map_selected_step.get("output_text") or "", height=170)
+                    map_epistemic = st.selectbox(
+                        "وضعیت معرفتی",
+                        EPISTEMIC,
+                        index=EPISTEMIC.index(map_selected_step.get("epistemic_status")) if map_selected_step.get("epistemic_status") in EPISTEMIC else 0,
+                    )
+                    map_save_step = st.form_submit_button("ذخیره تغییرات گره", type="primary", use_container_width=True)
+                if map_save_step:
+                    map_save_result = db_call(lambda: update_row("research_steps", {
+                        "role": map_role,
+                        "input_text": map_input.strip(),
+                        "output_text": map_output.strip(),
+                        "epistemic_status": map_epistemic,
+                    }, map_selected_step["id"]), "ویرایش گره ناموفق بود.")
+                    if map_save_result is not None:
+                        db_call(lambda: touch_session(map_sid))
+                        st.success("تغییرات گره ذخیره شد.")
+                        st.rerun()
+
+                with st.expander("افزودن شاهد به گره انتخاب‌شده"):
+                    with st.form("cognitive_map_add_evidence", clear_on_submit=True):
+                        map_ev_type = st.selectbox("نوع شاهد", ["منبع علمی", "سند رسمی", "داده تجربی", "مشاهده", "استدلال مخالف", "سایر"])
+                        map_ev_claim = st.text_area("ادعا یا محتوای شاهد", height=90)
+                        map_ev_title = st.text_input("عنوان منبع")
+                        map_ev_url = st.text_input("نشانی منبع")
+                        map_ev_reliability = st.selectbox("اعتبار اولیه", ["ارزیابی‌نشده", "بالا", "متوسط", "پایین", "متعارض"])
+                        map_ev_notes = st.text_area("یادداشت", height=70)
+                        map_ev_save = st.form_submit_button("ثبت شاهد")
+                    if map_ev_save:
+                        if not map_ev_claim.strip():
+                            st.warning("متن شاهد الزامی است.")
+                        elif not valid_source_url(map_ev_url):
+                            st.warning("نشانی منبع باید با http یا https شروع شود.")
+                        else:
+                            map_ev_result = db_call(lambda: insert_row("research_evidence", {
+                                "id": str(uuid.uuid4()),
+                                "step_id": map_selected_step["id"],
+                                "evidence_type": map_ev_type,
+                                "claim": map_ev_claim.strip(),
+                                "source_title": map_ev_title.strip(),
+                                "source_url": map_ev_url.strip(),
+                                "reliability": map_ev_reliability,
+                                "notes": map_ev_notes.strip(),
+                            }), "ثبت شاهد ناموفق بود.")
+                            if map_ev_result is not None:
+                                db_call(lambda: touch_session(map_sid))
+                                st.success("شاهد به گره متصل شد.")
+                                st.rerun()
+        else:
+            st.info("این جلسه هنوز مرحله‌ای ندارد. از فرم زیر نخستین گره را بساز.")
+
+        with st.expander("افزودن گره / عامل جدید", expanded=not bool(map_steps)):
+            with st.form("cognitive_map_add_step", clear_on_submit=True):
+                map_new_role = st.selectbox("نقش گره جدید", ROLES, index=6)
+                map_new_input = st.text_area("ورودی یا شرح وظیفه", height=90)
+                map_new_output = st.text_area("خروجی اولیه یا یادداشت", height=110)
+                map_new_epistemic = st.selectbox("وضعیت معرفتی", EPISTEMIC, index=0)
+                map_add_step = st.form_submit_button("افزودن گره به نقشه", type="primary", use_container_width=True)
+            if map_add_step:
+                map_next_sequence = max((int(item.get("sequence_no", 0)) for item in map_steps), default=0) + 1
+                map_add_result = db_call(lambda: insert_row("research_steps", {
+                    "id": str(uuid.uuid4()),
+                    "session_id": map_sid,
+                    "sequence_no": map_next_sequence,
+                    "role": map_new_role,
+                    "input_text": map_new_input.strip(),
+                    "output_text": map_new_output.strip(),
+                    "epistemic_status": map_new_epistemic,
+                }), "افزودن گره ناموفق بود.")
+                if map_add_result is not None:
+                    db_call(lambda: touch_session(map_sid))
+                    st.success("گره جدید به حافظه پژوهش اضافه شد.")
+                    st.rerun()
+
+        st.info("در این نسخه، اتصال مراحل به‌صورت توالی پژوهش و شواهد به‌صورت زیرگره نمایش داده می‌شود. ساخت شاخه‌های دلخواه و اتصال آزاد بین عامل‌ها به افزودن شناسه والد در مدل داده نیاز دارد؛ فعلاً هیچ تغییری در طرح پایگاه داده اعمال نشده است.")
 
 with tab_archive:
     st.subheader("حافظه پژوهشی نسخه قبلی")
