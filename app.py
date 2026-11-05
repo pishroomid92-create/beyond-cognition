@@ -12,6 +12,7 @@ from workflow import summarize_workflow
 from model_registry import PROVIDERS, configured_providers
 from provider_adapters import ModelProviderError, generate_model_response
 from workflow_agents import AGENT_SEQUENCE, build_agent_messages
+from cognitive_map import build_research_tree_dot, would_create_cycle
 
 logger = logging.getLogger("beyond_cognition")
 st.set_page_config(page_title="فراتر از شناخت", page_icon="🧠", layout="wide")
@@ -44,7 +45,7 @@ def require_app_password():
 
 require_app_password()
 
-APP_VERSION = "0.8.0"
+APP_VERSION = "0.9.0"
 PAGE_SIZE = 500
 TABLES = ("research_sessions", "research_steps", "research_evidence", "model_runs", "research_records")
 ROLES = ["صورت‌بندی مسئله", "تحلیل‌گر", "فرضیه‌ساز", "منتقد", "ارزیاب شواهد", "ترکیب‌کننده", "یادداشت پژوهشگر"]
@@ -540,6 +541,7 @@ with tab_work:
                             default=0,
                         ) + 1
                         completed_roles = []
+                        previous_step_id = None
                         pipeline_failed = False
                         for role in AGENT_SEQUENCE:
                             stage_messages = build_agent_messages(
@@ -594,11 +596,13 @@ with tab_work:
                                 pipeline_failed = True
                                 break
 
+                            stage_step_id = str(uuid.uuid4())
                             saved_step = db_call(
                                 lambda: insert_row("research_steps", {
-                                    "id": str(uuid.uuid4()),
+                                    "id": stage_step_id,
                                     "session_id": sid,
                                     "sequence_no": next_sequence,
+                                    "parent_step_id": previous_step_id,
                                     "role": role,
                                     "input_text": stage_prompt,
                                     "output_text": stage_result.text,
@@ -610,6 +614,7 @@ with tab_work:
                                 pipeline_failed = True
                                 break
 
+                            previous_step_id = stage_step_id
                             previous_outputs.append({
                                 "role": role,
                                 "output": stage_result.text,
@@ -680,7 +685,7 @@ with tab_work:
 
 with tab_map:
     st.subheader("فضای کار شناختی")
-    st.caption("نمای زنده ساختار پژوهش؛ انتخاب هر گره، جزئیات و ابزار ویرایش همان گره را باز می‌کند.")
+    st.caption("ساختار درختی واقعی؛ گره‌ها می‌توانند والد، فرزند و خواهر/برادر مستقل داشته باشند.")
 
     st.markdown("""
     <style>
@@ -693,7 +698,6 @@ with tab_map:
     .bc-node .role {font-weight:700;font-size:.95rem;color:inherit;margin-bottom:7px}
     .bc-node .meta {font-size:.78rem;opacity:.78;margin-bottom:8px}
     .bc-node .preview {font-size:.82rem;opacity:.9;line-height:1.5}
-    .bc-section {font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;opacity:.7;margin:16px 0 8px 2px}
     </style>
     """, unsafe_allow_html=True)
 
@@ -727,7 +731,6 @@ with tab_map:
         for evidence_item in map_evidence:
             evidence_by_map_step.setdefault(evidence_item["step_id"], []).append(evidence_item)
 
-        total_evidence = len(map_evidence)
         st.markdown(
             '<div class="bc-root"><small>RESEARCH ROOT / ریشه پژوهش</small><h3>' +
             html.escape(str(map_session.get("title") or "پرسش پژوهش")) +
@@ -736,162 +739,204 @@ with tab_map:
             unsafe_allow_html=True,
         )
         overview = st.columns(4)
-        overview[0].metric("عامل‌ها / گره‌ها", len(map_steps))
-        overview[1].metric("شواهد ثبت‌شده", total_evidence)
-        overview[2].metric("وضعیت پژوهش", str(map_session.get("status") or "نامشخص"))
+        overview[0].metric("گره‌ها", len(map_steps))
+        overview[1].metric("شواهد", len(map_evidence))
+        overview[2].metric("وضعیت", str(map_session.get("status") or "نامشخص"))
         overview[3].metric("نقش‌های اصلی", f'{len(set(x.get("role") for x in map_steps if x.get("role") in ROLES[:6]))}/6')
 
-        st.markdown('<div class="bc-section">نقشه عامل‌ها و مسیر تحلیل</div>', unsafe_allow_html=True)
+        st.markdown("### نقشه شاخه‌ای")
         if not map_steps:
-            st.info("این پژوهش هنوز گرهی ندارد. از بخش «افزودن گره» اولین عامل یا یادداشت را بساز.")
+            st.info("هنوز گرهی ثبت نشده است. از بخش افزودن گره شروع کن.")
         else:
             selected_id = st.session_state.get("cognitive_map_selected_step_id")
             if selected_id not in map_step_ids:
                 selected_id = map_steps[0]["id"]
                 st.session_state["cognitive_map_selected_step_id"] = selected_id
 
-            # Arrange nodes in a responsive three-column workspace. Each node is selectable.
             for row_start in range(0, len(map_steps), 3):
-                node_cols = st.columns(3)
+                cols = st.columns(3)
                 for offset, node in enumerate(map_steps[row_start:row_start + 3]):
                     node_id = node["id"]
-                    is_selected = node_id == selected_id
-                    node_evidence = evidence_by_map_step.get(node_id, [])
-                    node_status = node.get("epistemic_status") or "نامعلوم / بررسی‌نشده"
-                    preview = (node.get("input_text") or node.get("output_text") or "برای این گره هنوز محتوایی ثبت نشده است").strip()
-                    if len(preview) > 115:
-                        preview = preview[:112] + "…"
-                    with node_cols[offset]:
+                    selected = node_id == selected_id
+                    parent = next((x for x in map_steps if x["id"] == node.get("parent_step_id")), None)
+                    parent_name = parent.get("role") if parent else "ریشه"
+                    preview = (node.get("input_text") or node.get("output_text") or "بدون شرح").strip()
+                    preview = preview[:112] + ("…" if len(preview) > 112 else "")
+                    with cols[offset]:
                         st.markdown(
-                            '<div class="bc-node' + (' selected' if is_selected else '') + '">' +
-                            '<div class="role">' + html.escape(str(node.get("role") or "گره بدون نقش")) + '</div>' +
-                            '<div class="meta">گره ' + str(node.get("sequence_no", "—")) +
-                            ' · ' + html.escape(str(node_status)) + ' · ' + str(len(node_evidence)) + ' شاهد</div>' +
+                            '<div class="bc-node' + (' selected' if selected else '') + '">' +
+                            '<div class="role">' + html.escape(str(node.get("role") or "گره")) + '</div>' +
+                            '<div class="meta">والد: ' + html.escape(str(parent_name)) +
+                            ' · ' + html.escape(str(node.get("epistemic_status") or "نامعلوم")) + '</div>' +
                             '<div class="preview">' + html.escape(preview) + '</div></div>',
                             unsafe_allow_html=True,
                         )
-                        if st.button(
-                            "● گره انتخاب‌شده" if is_selected else "بازکردن گره",
-                            key="select_map_node_" + str(node_id),
-                            use_container_width=True,
-                            type="primary" if is_selected else "secondary",
-                        ):
+                        if st.button("● انتخاب‌شده" if selected else "انتخاب گره",
+                                     key="select_map_node_" + str(node_id),
+                                     use_container_width=True,
+                                     type="primary" if selected else "secondary"):
                             st.session_state["cognitive_map_selected_step_id"] = node_id
                             st.rerun()
 
-            with st.expander("نمای درختی فشرده (Graphviz)", expanded=False):
-                from cognitive_map import build_research_tree_dot
+            with st.expander("نمای درختی تعاملی/ساختاری (Graphviz)", expanded=True):
                 st.graphviz_chart(
                     build_research_tree_dot(map_session, map_steps, evidence_by_map_step),
                     use_container_width=True,
                 )
 
-            map_selected_step = next(x for x in map_steps if x["id"] == selected_id)
+            selected_step = next(x for x in map_steps if x["id"] == selected_id)
             selected_evidence = evidence_by_map_step.get(selected_id, [])
+            safe_parent_rows = [
+                row for row in map_steps
+                if row["id"] != selected_id and not would_create_cycle(map_steps, selected_id, row["id"])
+            ]
+            parent_labels = {"ریشه پژوهش (بدون والد)": None}
+            for row in safe_parent_rows:
+                parent_labels[f'{row.get("role") or "گره"} · {str(row["id"])[:8]}'] = row["id"]
+            current_parent = selected_step.get("parent_step_id")
+            current_parent_label = next(
+                (label for label, value in parent_labels.items() if value == current_parent),
+                "ریشه پژوهش (بدون والد)",
+            )
+
             st.divider()
-            detail_col, edit_col = st.columns([1, 1.15], gap="large")
-            with detail_col:
-                st.markdown("### پنل گره")
-                st.markdown("**" + str(map_selected_step.get("role") or "بدون نقش") + "**")
+            detail, editor = st.columns([1, 1.2], gap="large")
+            with detail:
+                st.markdown("### جزئیات گره")
+                st.markdown("**" + str(selected_step.get("role") or "بدون نقش") + "**")
                 st.caption("شناسه: " + str(selected_id))
-                st.markdown("**ورودی / شرح وظیفه**")
-                st.write(map_selected_step.get("input_text") or "ثبت نشده")
-                st.markdown("**خروجی / یادداشت**")
-                st.write(map_selected_step.get("output_text") or "ثبت نشده")
-                st.caption("وضعیت معرفتی: " + str(map_selected_step.get("epistemic_status") or "نامعلوم / بررسی‌نشده"))
-                st.markdown("#### شواهد متصل · " + str(len(selected_evidence)))
-                if not selected_evidence:
-                    st.info("هنوز شاهدی به این گره متصل نشده است.")
-                for evidence_item in selected_evidence:
-                    with st.expander(str(evidence_item.get("evidence_type") or "شاهد") + " · " + str(evidence_item.get("source_title") or "بدون عنوان")):
-                        st.write(evidence_item.get("claim") or "")
-                        if evidence_item.get("source_url"):
-                            st.markdown("[" + str(evidence_item.get("source_url")) + "](" + str(evidence_item.get("source_url")) + ")")
-                        st.caption("اعتبار: " + str(evidence_item.get("reliability") or "ارزیابی‌نشده"))
-                        if evidence_item.get("notes"):
-                            st.write(evidence_item["notes"])
+                st.write("**ورودی**")
+                st.write(selected_step.get("input_text") or "ثبت نشده")
+                st.write("**خروجی**")
+                st.write(selected_step.get("output_text") or "ثبت نشده")
+                st.caption("وضعیت معرفتی: " + str(selected_step.get("epistemic_status") or "نامعلوم"))
+                st.markdown("#### شواهد")
+                for ev in selected_evidence:
+                    with st.expander(str(ev.get("evidence_type") or "شاهد") + " · " + str(ev.get("source_title") or "بدون عنوان")):
+                        st.write(ev.get("claim") or "")
+                        if ev.get("source_url"):
+                            st.markdown("[" + str(ev["source_url"]) + "](" + str(ev["source_url"]) + ")")
+                        st.caption("اعتبار: " + str(ev.get("reliability") or "ارزیابی‌نشده"))
 
-            with edit_col:
-                st.markdown("### ویرایش و تکمیل گره")
+            with editor:
+                st.markdown("### ویرایش گره و رابطه")
                 with st.form("cognitive_map_edit_step_" + str(selected_id)):
-                    map_role = st.selectbox(
-                        "نقش عامل",
-                        ROLES,
-                        index=ROLES.index(map_selected_step.get("role")) if map_selected_step.get("role") in ROLES else 0,
+                    role_value = st.selectbox(
+                        "نقش عامل", ROLES,
+                        index=ROLES.index(selected_step.get("role")) if selected_step.get("role") in ROLES else 0,
                     )
-                    map_input = st.text_area("ورودی / دستور کار", value=map_selected_step.get("input_text") or "", height=100)
-                    map_output = st.text_area("خروجی / یادداشت", value=map_selected_step.get("output_text") or "", height=150)
-                    map_epistemic = st.selectbox(
-                        "وضعیت معرفتی",
-                        EPISTEMIC,
-                        index=EPISTEMIC.index(map_selected_step.get("epistemic_status")) if map_selected_step.get("epistemic_status") in EPISTEMIC else 0,
+                    parent_label = st.selectbox(
+                        "والد گره", list(parent_labels.keys()),
+                        index=list(parent_labels.keys()).index(current_parent_label),
                     )
-                    map_save_step = st.form_submit_button("ذخیره تغییرات گره", type="primary", use_container_width=True)
-                if map_save_step:
-                    map_save_result = db_call(lambda: update_row("research_steps", {
-                        "role": map_role,
-                        "input_text": map_input.strip(),
-                        "output_text": map_output.strip(),
-                        "epistemic_status": map_epistemic,
-                    }, selected_id), "ویرایش گره ناموفق بود.")
-                    if map_save_result is not None:
-                        db_call(lambda: touch_session(map_sid))
-                        st.success("تغییرات گره ذخیره شد.")
-                        st.rerun()
+                    input_value = st.text_area("ورودی / دستور کار", value=selected_step.get("input_text") or "", height=90)
+                    output_value = st.text_area("خروجی / یادداشت", value=selected_step.get("output_text") or "", height=130)
+                    epistemic_value = st.selectbox(
+                        "وضعیت معرفتی", EPISTEMIC,
+                        index=EPISTEMIC.index(selected_step.get("epistemic_status")) if selected_step.get("epistemic_status") in EPISTEMIC else 0,
+                    )
+                    save_node = st.form_submit_button("ذخیره گره و اتصال", type="primary", use_container_width=True)
+                if save_node:
+                    new_parent = parent_labels[parent_label]
+                    if would_create_cycle(map_steps, selected_id, new_parent):
+                        st.error("این اتصال چرخه ایجاد می‌کند؛ تغییر رد شد.")
+                    else:
+                        saved = db_call(lambda: update_row("research_steps", {
+                            "role": role_value,
+                            "parent_step_id": new_parent,
+                            "input_text": input_value.strip(),
+                            "output_text": output_value.strip(),
+                            "epistemic_status": epistemic_value,
+                        }, selected_id), "ذخیره گره ناموفق بود.")
+                        if saved is not None:
+                            db_call(lambda: touch_session(map_sid))
+                            st.success("گره و رابطه والد ذخیره شد.")
+                            st.rerun()
 
-                with st.expander("＋ افزودن شاهد به همین گره"):
+                siblings = sorted(
+                    [x for x in map_steps if x.get("parent_step_id") == current_parent],
+                    key=lambda x: (int(x.get("sequence_no", 0)), str(x["id"])),
+                )
+                sibling_index = next(i for i, item in enumerate(siblings) if item["id"] == selected_id)
+                up, down = st.columns(2)
+                with up:
+                    if st.button("↑ انتقال به بالا", disabled=sibling_index == 0, key="move_up_" + str(selected_id), use_container_width=True):
+                        other = siblings[sibling_index - 1]
+                        temp = max((int(x.get("sequence_no", 0)) for x in map_steps), default=0) + 1
+                        r1 = db_call(lambda: update_row("research_steps", {"sequence_no": temp}, selected_id))
+                        r2 = db_call(lambda: update_row("research_steps", {"sequence_no": selected_step.get("sequence_no", 0)}, other["id"]))
+                        r3 = db_call(lambda: update_row("research_steps", {"sequence_no": other.get("sequence_no", 0)}, selected_id))
+                        if r1 is not None and r2 is not None and r3 is not None:
+                            db_call(lambda: touch_session(map_sid))
+                            st.rerun()
+                with down:
+                    if st.button("↓ انتقال به پایین", disabled=sibling_index == len(siblings) - 1, key="move_down_" + str(selected_id), use_container_width=True):
+                        other = siblings[sibling_index + 1]
+                        temp = max((int(x.get("sequence_no", 0)) for x in map_steps), default=0) + 1
+                        r1 = db_call(lambda: update_row("research_steps", {"sequence_no": temp}, selected_id))
+                        r2 = db_call(lambda: update_row("research_steps", {"sequence_no": selected_step.get("sequence_no", 0)}, other["id"]))
+                        r3 = db_call(lambda: update_row("research_steps", {"sequence_no": other.get("sequence_no", 0)}, selected_id))
+                        if r1 is not None and r2 is not None and r3 is not None:
+                            db_call(lambda: touch_session(map_sid))
+                            st.rerun()
+
+                with st.expander("＋ افزودن شاهد"):
                     with st.form("cognitive_map_add_evidence_" + str(selected_id), clear_on_submit=True):
-                        map_ev_type = st.selectbox("نوع شاهد", ["منبع علمی", "سند رسمی", "داده تجربی", "مشاهده", "استدلال مخالف", "سایر"])
-                        map_ev_claim = st.text_area("ادعا یا محتوای شاهد", height=85)
-                        map_ev_title = st.text_input("عنوان منبع")
-                        map_ev_url = st.text_input("نشانی منبع")
-                        map_ev_reliability = st.selectbox("اعتبار اولیه", ["ارزیابی‌نشده", "بالا", "متوسط", "پایین", "متعارض"])
-                        map_ev_notes = st.text_area("یادداشت", height=65)
-                        map_ev_save = st.form_submit_button("ثبت شاهد", use_container_width=True)
-                    if map_ev_save:
-                        if not map_ev_claim.strip():
+                        ev_type = st.selectbox("نوع شاهد", ["منبع علمی", "سند رسمی", "داده تجربی", "مشاهده", "استدلال مخالف", "سایر"])
+                        ev_claim = st.text_area("ادعا یا محتوای شاهد", height=80)
+                        ev_title = st.text_input("عنوان منبع")
+                        ev_url = st.text_input("نشانی منبع")
+                        ev_reliability = st.selectbox("اعتبار اولیه", ["ارزیابی‌نشده", "بالا", "متوسط", "پایین", "متعارض"])
+                        ev_notes = st.text_area("یادداشت", height=60)
+                        ev_save = st.form_submit_button("ثبت شاهد", use_container_width=True)
+                    if ev_save:
+                        if not ev_claim.strip():
                             st.warning("متن شاهد الزامی است.")
-                        elif not valid_source_url(map_ev_url):
+                        elif not valid_source_url(ev_url):
                             st.warning("نشانی منبع باید با http یا https شروع شود.")
                         else:
-                            map_ev_result = db_call(lambda: insert_row("research_evidence", {
-                                "id": str(uuid.uuid4()),
-                                "step_id": selected_id,
-                                "evidence_type": map_ev_type,
-                                "claim": map_ev_claim.strip(),
-                                "source_title": map_ev_title.strip(),
-                                "source_url": map_ev_url.strip(),
-                                "reliability": map_ev_reliability,
-                                "notes": map_ev_notes.strip(),
+                            result = db_call(lambda: insert_row("research_evidence", {
+                                "id": str(uuid.uuid4()), "step_id": selected_id,
+                                "evidence_type": ev_type, "claim": ev_claim.strip(),
+                                "source_title": ev_title.strip(), "source_url": ev_url.strip(),
+                                "reliability": ev_reliability, "notes": ev_notes.strip(),
                             }), "ثبت شاهد ناموفق بود.")
-                            if map_ev_result is not None:
+                            if result is not None:
                                 db_call(lambda: touch_session(map_sid))
-                                st.success("شاهد به گره متصل شد.")
+                                st.success("شاهد ثبت شد.")
                                 st.rerun()
 
         st.divider()
-        with st.expander("＋ افزودن عامل، شاخه یا یادداشت جدید", expanded=not bool(map_steps)):
-            st.caption("گره جدید به‌عنوان مرحله بعدی همین پژوهش ذخیره می‌شود. ساخت پیوندهای دلخواه بین گره‌ها در مرحله بعدی، پس از افزودن رابطه والد در مدل داده، فعال خواهد شد.")
+        with st.expander("＋ افزودن گره یا شاخه جدید", expanded=not bool(map_steps)):
+            parent_options = {"ریشه پژوهش (بدون والد)": None}
+            for row in map_steps:
+                parent_options[f'{row.get("role") or "گره"} · {str(row["id"])[:8]}'] = row["id"]
+            default_parent_label = next(
+                (label for label, value in parent_options.items()
+                 if value == st.session_state.get("cognitive_map_selected_step_id")),
+                "ریشه پژوهش (بدون والد)",
+            )
             with st.form("cognitive_map_add_step", clear_on_submit=True):
-                map_new_role = st.selectbox("نقش گره جدید", ROLES, index=6)
-                map_new_input = st.text_area("ورودی یا شرح وظیفه", height=85)
-                map_new_output = st.text_area("خروجی اولیه یا یادداشت", height=95)
-                map_new_epistemic = st.selectbox("وضعیت معرفتی", EPISTEMIC, index=0)
-                map_add_step = st.form_submit_button("افزودن گره به نقشه", type="primary", use_container_width=True)
-            if map_add_step:
-                map_next_sequence = max((int(item.get("sequence_no", 0)) for item in map_steps), default=0) + 1
-                map_add_result = db_call(lambda: insert_row("research_steps", {
-                    "id": str(uuid.uuid4()),
-                    "session_id": map_sid,
-                    "sequence_no": map_next_sequence,
-                    "role": map_new_role,
-                    "input_text": map_new_input.strip(),
-                    "output_text": map_new_output.strip(),
-                    "epistemic_status": map_new_epistemic,
+                new_role = st.selectbox("نقش گره جدید", ROLES, index=6)
+                new_parent_label = st.selectbox(
+                    "ساخت زیرمجموعه برای", list(parent_options.keys()),
+                    index=list(parent_options.keys()).index(default_parent_label),
+                )
+                new_input = st.text_area("ورودی یا شرح وظیفه", height=80)
+                new_output = st.text_area("خروجی اولیه یا یادداشت", height=90)
+                new_epistemic = st.selectbox("وضعیت معرفتی", EPISTEMIC, index=0)
+                add_node = st.form_submit_button("افزودن گره به درخت", type="primary", use_container_width=True)
+            if add_node:
+                next_seq = max((int(item.get("sequence_no", 0)) for item in map_steps), default=0) + 1
+                result = db_call(lambda: insert_row("research_steps", {
+                    "id": str(uuid.uuid4()), "session_id": map_sid,
+                    "sequence_no": next_seq, "parent_step_id": parent_options[new_parent_label],
+                    "role": new_role, "input_text": new_input.strip(),
+                    "output_text": new_output.strip(), "epistemic_status": new_epistemic,
                 }), "افزودن گره ناموفق بود.")
-                if map_add_result is not None:
+                if result is not None:
                     db_call(lambda: touch_session(map_sid))
-                    st.success("گره جدید به حافظه پژوهش اضافه شد.")
+                    st.success("گره جدید به درخت پژوهش افزوده شد.")
                     st.rerun()
 
 with tab_archive:
