@@ -793,6 +793,7 @@ with tab_map:
                     hierarchical=True,
                     nodeHighlightBehavior=True,
                     highlightColor="#60a5fa",
+                    collapsible=True,
                 )
                 graph_selection = agraph(
                     nodes=graph_nodes,
