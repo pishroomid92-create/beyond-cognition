@@ -141,8 +141,8 @@ m[1].metric("فعال", active_count)
 m[2].metric("متوقف", paused_count)
 m[3].metric("تکمیل‌شده", completed_count)
 
-tab_home, tab_new, tab_work, tab_map, tab_archive, tab_backup = st.tabs(
-    ["نمای کلی", "پژوهش جدید", "میز کار پژوهش", "نقشه شناختی", "حافظه قبلی", "پشتیبان‌گیری"]
+tab_map, tab_home, tab_new, tab_work, tab_archive, tab_backup = st.tabs(
+    ["🧠 فضای شناختی", "نمای کلی", "پژوهش جدید", "میز کار پژوهش", "حافظه قبلی", "پشتیبان‌گیری"]
 )
 
 with tab_home:
@@ -685,8 +685,8 @@ with tab_work:
                         st.write(run["response"])
 
 with tab_map:
-    st.subheader("فضای کار شناختی")
-    st.caption("ساختار درختی واقعی؛ گره‌ها می‌توانند والد، فرزند و خواهر/برادر مستقل داشته باشند.")
+    st.subheader("🧠 فضای شناختی")
+    st.caption("محیط اصلی پژوهش؛ ساختار، عامل‌ها، شواهد و روابط را از روی نقشه مدیریت کن.")
 
     st.markdown("""
     <style>
