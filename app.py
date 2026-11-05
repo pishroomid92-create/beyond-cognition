@@ -46,7 +46,7 @@ def require_app_password():
 
 require_app_password()
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 PAGE_SIZE = 500
 TABLES = ("research_sessions", "research_steps", "research_evidence", "model_runs", "research_records")
 ROLES = ["صورت‌بندی مسئله", "تحلیل‌گر", "فرضیه‌ساز", "منتقد", "ارزیاب شواهد", "ترکیب‌کننده", "یادداشت پژوهشگر"]
@@ -141,8 +141,8 @@ m[1].metric("فعال", active_count)
 m[2].metric("متوقف", paused_count)
 m[3].metric("تکمیل‌شده", completed_count)
 
-tab_home, tab_new, tab_work, tab_map, tab_archive, tab_backup = st.tabs(
-    ["نمای کلی", "پژوهش جدید", "میز کار پژوهش", "نقشه شناختی", "حافظه قبلی", "پشتیبان‌گیری"]
+tab_map, tab_home, tab_new, tab_work, tab_archive, tab_backup = st.tabs(
+    ["🧠 فضای شناختی", "نمای کلی", "پژوهش جدید", "میز کار پژوهش", "حافظه قبلی", "پشتیبان‌گیری"]
 )
 
 with tab_home:
@@ -685,16 +685,20 @@ with tab_work:
                         st.write(run["response"])
 
 with tab_map:
-    st.subheader("فضای کار شناختی")
-    st.caption("ساختار درختی واقعی؛ گره‌ها می‌توانند والد، فرزند و خواهر/برادر مستقل داشته باشند.")
+    st.subheader("🧠 فضای شناختی")
+    st.caption("محیط اصلی پژوهش؛ ساختار، عامل‌ها، شواهد و روابط را از روی نقشه مدیریت کن.")
 
     st.markdown("""
     <style>
-    .bc-root {background:linear-gradient(120deg,#172554,#1e3a8a);color:#fff;padding:22px 24px;border-radius:16px;margin:8px 0 18px 0;border:1px solid #3b82f6}
+    .bc-root {background:linear-gradient(120deg,#111827,#172554 55%,#1e3a8a);color:#fff;padding:22px 24px;border-radius:18px;margin:8px 0 18px 0;border:1px solid #3b82f6;box-shadow:0 14px 38px rgba(15,23,42,.22)}
     .bc-root small {color:#bfdbfe;letter-spacing:.04em}
     .bc-root h3 {color:#fff;margin:6px 0;font-size:1.2rem}
     .bc-root p {color:#dbeafe;margin:0;font-size:.92rem}
     .bc-node {border:1px solid #334155;border-radius:13px;padding:14px 14px 10px 14px;background:rgba(30,41,59,.48);min-height:138px;margin-bottom:8px}
+    div[data-testid="stTabs"] button {font-weight:650}
+    div[data-testid="stTabs"] button[aria-selected="true"] {border-bottom:3px solid #60a5fa;color:#60a5fa}
+    .stMetric {background:rgba(30,41,59,.38);border:1px solid rgba(148,163,184,.22);padding:12px 14px;border-radius:14px}
+    div[data-testid="stExpander"] {border-radius:13px;border-color:rgba(148,163,184,.25)}
     .bc-node.selected {border:2px solid #60a5fa;background:rgba(30,64,175,.18)}
     .bc-node .role {font-weight:700;font-size:.95rem;color:inherit;margin-bottom:7px}
     .bc-node .meta {font-size:.78rem;opacity:.78;margin-bottom:8px}
@@ -747,39 +751,24 @@ with tab_map:
 
         st.markdown("### نقشه شاخه‌ای")
         if not map_steps:
-            st.info("هنوز گرهی ثبت نشده است. از بخش افزودن گره شروع کن.")
+            st.info("این پژوهش هنوز گرهی ندارد. ریشه پژوهش در بالا نمایش داده شده؛ نخستین عامل را از فرم افزودن گره بساز.")
+            empty_nodes_data, empty_edges_data = build_interactive_graph_data(
+                map_session, [], {}
+            )
+            agraph(
+                nodes=[Node(**item) for item in empty_nodes_data],
+                edges=[Edge(**item) for item in empty_edges_data],
+                config=Config(width="100%", height=560, directed=True, physics=False, hierarchical=True),
+            )
         else:
             selected_id = st.session_state.get("cognitive_map_selected_step_id")
             if selected_id not in map_step_ids:
                 selected_id = map_steps[0]["id"]
                 st.session_state["cognitive_map_selected_step_id"] = selected_id
 
-            for row_start in range(0, len(map_steps), 3):
-                cols = st.columns(3)
-                for offset, node in enumerate(map_steps[row_start:row_start + 3]):
-                    node_id = node["id"]
-                    selected = node_id == selected_id
-                    parent = next((x for x in map_steps if x["id"] == node.get("parent_step_id")), None)
-                    parent_name = parent.get("role") if parent else "ریشه"
-                    preview = (node.get("input_text") or node.get("output_text") or "بدون شرح").strip()
-                    preview = preview[:112] + ("…" if len(preview) > 112 else "")
-                    with cols[offset]:
-                        st.markdown(
-                            '<div class="bc-node' + (' selected' if selected else '') + '">' +
-                            '<div class="role">' + html.escape(str(node.get("role") or "گره")) + '</div>' +
-                            '<div class="meta">والد: ' + html.escape(str(parent_name)) +
-                            ' · ' + html.escape(str(node.get("epistemic_status") or "نامعلوم")) + '</div>' +
-                            '<div class="preview">' + html.escape(preview) + '</div></div>',
-                            unsafe_allow_html=True,
-                        )
-                        if st.button("● انتخاب‌شده" if selected else "انتخاب گره",
-                                     key="select_map_node_" + str(node_id),
-                                     use_container_width=True,
-                                     type="primary" if selected else "secondary"):
-                            st.session_state["cognitive_map_selected_step_id"] = node_id
-                            st.rerun()
+            with st.container(border=True):
+                st.markdown("#### نقشه زنده پژوهش")
 
-            with st.expander("نقشه گرافیکی تعاملی", expanded=True):
                 graph_nodes_data, graph_edges_data = build_interactive_graph_data(
                     map_session, map_steps, evidence_by_map_step
                 )
@@ -787,7 +776,7 @@ with tab_map:
                 graph_edges = [Edge(**item) for item in graph_edges_data]
                 graph_config = Config(
                     width="100%",
-                    height=560,
+                    height=720,
                     directed=True,
                     physics=False,
                     hierarchical=True,
@@ -810,7 +799,7 @@ with tab_map:
                     if clicked_step_id in map_step_ids and clicked_step_id != st.session_state.get("cognitive_map_selected_step_id"):
                         st.session_state["cognitive_map_selected_step_id"] = clicked_step_id
                         st.rerun()
-                st.caption("روی گره عامل یا شاهد کلیک کن تا جزئیات آن در پنل ویرایش باز شود. با کشیدن بوم می‌توانی نقشه را جابه‌جا و با چرخ ماوس بزرگ‌نمایی کنی؛ موقعیت دستی گره‌ها در این نسخه ذخیره نمی‌شود.")
+                st.caption("گره‌ها را انتخاب کن تا جزئیات و ویرایش همان گره در پایین نقشه نمایش داده شود. بوم قابل جابه‌جایی و بزرگ‌نمایی است؛ موقعیت دستی گره‌ها فعلاً ذخیره دائمی نمی‌شود.")
             with st.expander("نمای ساختاری متنی (Graphviz)", expanded=False):
                 st.graphviz_chart(
                     build_research_tree_dot(map_session, map_steps, evidence_by_map_step),
