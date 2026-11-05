@@ -59,3 +59,31 @@ def test_parent_change_rejects_self_and_descendant_cycles():
     assert would_create_cycle(steps, "a", "c")
     assert not would_create_cycle(steps, "c", "a")
     assert not would_create_cycle(steps, "b", None)
+
+
+def test_interactive_graph_data_contains_branching_nodes_and_evidence():
+    from cognitive_map import build_interactive_graph_data
+
+    session = {"title": "پژوهش تعاملی"}
+    steps = [
+        {"id": "a", "sequence_no": 1, "parent_step_id": None, "role": "تحلیل‌گر"},
+        {"id": "b", "sequence_no": 2, "parent_step_id": "a", "role": "منتقد"},
+        {"id": "c", "sequence_no": 3, "parent_step_id": "a", "role": "فرضیه‌ساز"},
+    ]
+    evidence = {"b": [{"source_title": "سند آزمایشی", "evidence_type": "سند رسمی"}]}
+    nodes, edges = build_interactive_graph_data(session, steps, evidence)
+    node_ids = {node["id"] for node in nodes}
+    edge_pairs = {(edge["source"], edge["target"]) for edge in edges}
+    assert "root" in node_ids
+    assert "step:a" in node_ids and "step:b" in node_ids and "step:c" in node_ids
+    assert any(node["id"].startswith("evidence:b:") for node in nodes)
+    assert ("step:a", "step:b") in edge_pairs
+    assert ("step:a", "step:c") in edge_pairs
+
+
+def test_interactive_graph_empty_state_is_renderable():
+    from cognitive_map import build_interactive_graph_data
+
+    nodes, edges = build_interactive_graph_data({"title": "خالی"}, [], {})
+    assert {node["id"] for node in nodes} == {"root", "empty"}
+    assert edges == [{"source": "root", "target": "empty"}]
