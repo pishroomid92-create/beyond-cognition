@@ -53,10 +53,19 @@ def build_agent_messages(role, central_question, previous_outputs):
         if not isinstance(item, dict):
             continue
         prior_role = str(item.get("role", "مرحله قبلی"))
+        prior_provider = str(item.get("provider", "")).strip()
+        prior_model = str(item.get("model", "")).strip()
         prior_text = str(item.get("output", "")).strip()
         if prior_text:
+            provenance_parts = [
+                part for part in (prior_provider, prior_model) if part
+            ]
+            provenance = (
+                " (" + " / ".join(provenance_parts) + ")"
+                if provenance_parts else ""
+            )
             context_parts.append(
-                "### " + prior_role + "\n" + prior_text[:6000]
+                "### " + prior_role + provenance + "\n" + prior_text[:6000]
             )
 
     system = (

@@ -33,3 +33,19 @@ def test_unknown_role_and_empty_question_are_rejected():
         build_agent_messages("نقش ناموجود", "پرسش", [])
     with pytest.raises(ValueError):
         build_agent_messages("تحلیل‌گر", " ", [])
+
+
+
+def test_later_stage_context_includes_model_provenance():
+    messages = build_agent_messages(
+        "منتقد",
+        "پرسش پژوهش",
+        [{
+            "role": "تحلیل‌گر",
+            "provider": "openrouter",
+            "model": "provider/model-a",
+            "output": "تحلیل اولیه",
+        }],
+    )
+    assert "openrouter / provider/model-a" in messages[1]["content"]
+    assert "تحلیل اولیه" in messages[1]["content"]

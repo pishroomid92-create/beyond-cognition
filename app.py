@@ -11,6 +11,7 @@ from workflow import summarize_workflow
 from model_registry import PROVIDERS, configured_providers
 from provider_adapters import ModelProviderError, generate_model_response
 from workflow_agents import AGENT_SEQUENCE, build_agent_messages
+from workflow_routing import validate_stage_routes
 
 logger = logging.getLogger("beyond_cognition")
 st.set_page_config(page_title="فراتر از شناخت", page_icon="🧠", layout="wide")
@@ -43,7 +44,7 @@ def require_app_password():
 
 require_app_password()
 
-APP_VERSION = "0.6.0"
+APP_VERSION = "0.7.0"
 PAGE_SIZE = 500
 TABLES = ("research_sessions", "research_steps", "research_evidence", "model_runs", "research_records")
 ROLES = ["صورت‌بندی مسئله", "تحلیل‌گر", "فرضیه‌ساز", "منتقد", "ارزیاب شواهد", "ترکیب‌کننده", "یادداشت پژوهشگر"]
@@ -501,11 +502,51 @@ with tab_work:
                 st.divider()
                 st.markdown("### اجرای گردش‌کار شش‌مرحله‌ای پژوهش")
                 st.caption(
-                    "در این نسخه شش نقش به‌ترتیب با همین مدل اجرا می‌شوند؛ "
-                    "این گردش‌کار چندمرحله‌ای است، نه شش مدل مستقل. "
-                    "هر مرحله پس از دریافت پاسخ ذخیره می‌شود. در صورت خطا، "
-                    "مراحل موفق قبلی باقی می‌مانند و اجرا متوقف می‌شود."
+                    "برای هر نقش می‌توان ارائه‌دهنده و شناسه مدل جداگانه تعیین کرد. "
+                    "مراحل همچنان ترتیبی اجرا می‌شوند و خروجی‌های قبلی به مرحله بعد می‌رسند. "
+                    "نقش‌های متفاوت به‌تنهایی به معنی داوری مستقل نیستند؛ تنوع واقعی به "
+                    "انتخاب مدل‌ها و ارزیابی انسانی وابسته است."
                 )
+                stage_route_inputs = {}
+                default_route_model = model_id.strip()
+                for route_index, route_role in enumerate(AGENT_SEQUENCE):
+                    with st.expander("تنظیم مدل نقش: " + route_role, expanded=False):
+                        route_provider = st.selectbox(
+                            "ارائه‌دهنده این نقش",
+                            available_providers,
+                            index=available_providers.index(selected_provider),
+                            format_func=lambda value: provider_labels[value],
+                            key=f"stage_provider_{route_index}",
+                        )
+                        route_model = st.text_input(
+                            "شناسه مدل این نقش",
+                            value=default_route_model,
+                            placeholder="شناسه دقیق مدل در سرویس انتخاب‌شده",
+                            key=f"stage_model_{route_index}",
+                        )
+                        stage_route_inputs[route_role] = {
+                            "provider": route_provider,
+                            "model": route_model,
+                        }
+
+                validated_routes, route_errors = validate_stage_routes(
+                    stage_route_inputs, AGENT_SEQUENCE, available_providers
+                )
+                if not route_errors:
+                    distinct_routes = {
+                        (route["provider"], route["model"])
+                        for route in validated_routes.values()
+                    }
+                    if len(distinct_routes) == 1:
+                        st.info(
+                            "در حال حاضر همه نقش‌ها به یک مدل متصل‌اند. "
+                            "برای تنوع مدل، تنظیم یک یا چند نقش را تغییر بده."
+                        )
+                    else:
+                        st.success(
+                            f"{len(distinct_routes)} مسیر مدل متفاوت برای شش نقش تنظیم شده است."
+                        )
+
                 with st.form("agent_pipeline_form"):
                     pipeline_question = st.text_area(
                         "پرسش مرکزی برای گردش‌کار",
@@ -530,8 +571,8 @@ with tab_work:
                 if run_pipeline:
                     if not pipeline_question.strip():
                         st.warning("پرسش مرکزی پژوهش خالی است.")
-                    elif not model_id.strip():
-                        st.warning("شناسه مدل را وارد کن.")
+                    elif route_errors:
+                        st.error("تنظیمات مسیریابی کامل نیست: " + "؛ ".join(route_errors))
                     else:
                         previous_outputs = []
                         next_sequence = max(
@@ -541,6 +582,12 @@ with tab_work:
                         completed_roles = []
                         pipeline_failed = False
                         for role in AGENT_SEQUENCE:
+                            stage_route = validated_routes[role]
+                            stage_provider = stage_route["provider"]
+                            stage_model = stage_route["model"]
+                            stage_api_key = str(
+                                st.secrets.get(PROVIDERS[stage_provider]["secret_name"], "")
+                            ).strip()
                             stage_messages = build_agent_messages(
                                 role, pipeline_question, previous_outputs
                             )
@@ -550,10 +597,10 @@ with tab_work:
                             with st.spinner("در حال اجرای مرحله: " + role):
                                 try:
                                     stage_result = generate_model_response(
-                                        provider=selected_provider,
-                                        model=model_id.strip(),
+                                        provider=stage_provider,
+                                        model=stage_model,
                                         messages=stage_messages,
-                                        api_key=api_key,
+                                        api_key=stage_api_key,
                                         temperature=pipeline_temperature,
                                         max_output_tokens=pipeline_tokens,
                                         timeout_seconds=90,
@@ -563,8 +610,8 @@ with tab_work:
                                         lambda: insert_row("model_runs", {
                                             "id": str(uuid.uuid4()),
                                             "session_id": sid,
-                                            "provider": selected_provider,
-                                            "model_name": model_id.strip(),
+                                            "provider": stage_provider,
+                                            "model_name": stage_model,
                                             "task_role": role,
                                             "prompt": stage_prompt,
                                             "response": str(exc),
@@ -580,7 +627,7 @@ with tab_work:
                                 lambda: insert_row("model_runs", {
                                     "id": str(uuid.uuid4()),
                                     "session_id": sid,
-                                    "provider": selected_provider,
+                                    "provider": stage_provider,
                                     "model_name": stage_result.model,
                                     "task_role": role,
                                     "prompt": stage_prompt,
@@ -599,7 +646,14 @@ with tab_work:
                                     "session_id": sid,
                                     "sequence_no": next_sequence,
                                     "role": role,
-                                    "input_text": stage_prompt,
+                                    "input_text": (
+                                        stage_prompt
+                                        + "\n\n[اجرا با: "
+                                        + stage_provider
+                                        + " / "
+                                        + stage_result.model
+                                        + "]"
+                                    ),
                                     "output_text": stage_result.text,
                                     "epistemic_status": "نامعلوم / بررسی‌نشده",
                                 }),
@@ -611,6 +665,8 @@ with tab_work:
 
                             previous_outputs.append({
                                 "role": role,
+                                "provider": stage_provider,
+                                "model": stage_result.model,
                                 "output": stage_result.text,
                             })
                             completed_roles.append(role)
