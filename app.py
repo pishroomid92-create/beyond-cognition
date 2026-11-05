@@ -1,4 +1,5 @@
 import hmac
+import html
 import json
 import logging
 import uuid
@@ -43,7 +44,7 @@ def require_app_password():
 
 require_app_password()
 
-APP_VERSION = "0.7.0"
+APP_VERSION = "0.8.0"
 PAGE_SIZE = 500
 TABLES = ("research_sessions", "research_steps", "research_evidence", "model_runs", "research_records")
 ROLES = ["صورت‌بندی مسئله", "تحلیل‌گر", "فرضیه‌ساز", "منتقد", "ارزیاب شواهد", "ترکیب‌کننده", "یادداشت پژوهشگر"]
@@ -729,8 +730,8 @@ with tab_map:
         total_evidence = len(map_evidence)
         st.markdown(
             '<div class="bc-root"><small>RESEARCH ROOT / ریشه پژوهش</small><h3>' +
-            str(map_session.get("title") or "پرسش پژوهش") +
-            '</h3><p>' + str(map_session.get("central_question") or "پرسش مرکزی ثبت نشده است") +
+            html.escape(str(map_session.get("title") or "پرسش پژوهش")) +
+            '</h3><p>' + html.escape(str(map_session.get("central_question") or "پرسش مرکزی ثبت نشده است")) +
             '</p></div>',
             unsafe_allow_html=True,
         )
@@ -763,9 +764,9 @@ with tab_map:
                     with node_cols[offset]:
                         st.markdown(
                             '<div class="bc-node' + (' selected' if is_selected else '') + '">' +
-                            '<div class="role">' + str(node.get("role") or "گره بدون نقش") + '</div>' +
+                            '<div class="role">' + html.escape(str(node.get("role") or "گره بدون نقش")) + '</div>' +
                             '<div class="meta">گره ' + str(node.get("sequence_no", "—")) +
-                            ' · ' + node_status + ' · ' + str(len(node_evidence)) + ' شاهد</div>' +
+                            ' · ' + html.escape(str(node_status)) + ' · ' + str(len(node_evidence)) + ' شاهد</div>' +
                             '<div class="preview">' + preview.replace("<", "&lt;").replace(">", "&gt;") + '</div></div>',
                             unsafe_allow_html=True,
                         )
