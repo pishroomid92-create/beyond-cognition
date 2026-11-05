@@ -12,6 +12,7 @@ from workflow import summarize_workflow
 from model_registry import PROVIDERS, configured_providers
 from provider_adapters import ModelProviderError, generate_model_response
 from workflow_agents import AGENT_SEQUENCE, build_agent_messages
+from cognitive_map import build_research_tree_dot, would_create_cycle
 
 logger = logging.getLogger("beyond_cognition")
 st.set_page_config(page_title="فراتر از شناخت", page_icon="🧠", layout="wide")
@@ -44,7 +45,7 @@ def require_app_password():
 
 require_app_password()
 
-APP_VERSION = "0.8.0"
+APP_VERSION = "0.9.0"
 PAGE_SIZE = 500
 TABLES = ("research_sessions", "research_steps", "research_evidence", "model_runs", "research_records")
 ROLES = ["صورت‌بندی مسئله", "تحلیل‌گر", "فرضیه‌ساز", "منتقد", "ارزیاب شواهد", "ترکیب‌کننده", "یادداشت پژوهشگر"]
@@ -540,6 +541,7 @@ with tab_work:
                             default=0,
                         ) + 1
                         completed_roles = []
+                        previous_step_id = None
                         pipeline_failed = False
                         for role in AGENT_SEQUENCE:
                             stage_messages = build_agent_messages(
@@ -594,11 +596,13 @@ with tab_work:
                                 pipeline_failed = True
                                 break
 
+                            stage_step_id = str(uuid.uuid4())
                             saved_step = db_call(
                                 lambda: insert_row("research_steps", {
-                                    "id": str(uuid.uuid4()),
+                                    "id": stage_step_id,
                                     "session_id": sid,
                                     "sequence_no": next_sequence,
+                                    "parent_step_id": previous_step_id,
                                     "role": role,
                                     "input_text": stage_prompt,
                                     "output_text": stage_result.text,
@@ -610,6 +614,7 @@ with tab_work:
                                 pipeline_failed = True
                                 break
 
+                            previous_step_id = stage_step_id
                             previous_outputs.append({
                                 "role": role,
                                 "output": stage_result.text,
