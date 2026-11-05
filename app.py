@@ -767,7 +767,7 @@ with tab_map:
                             '<div class="role">' + html.escape(str(node.get("role") or "گره بدون نقش")) + '</div>' +
                             '<div class="meta">گره ' + str(node.get("sequence_no", "—")) +
                             ' · ' + html.escape(str(node_status)) + ' · ' + str(len(node_evidence)) + ' شاهد</div>' +
-                            '<div class="preview">' + preview.replace("<", "&lt;").replace(">", "&gt;") + '</div></div>',
+                            '<div class="preview">' + html.escape(preview) + '</div></div>',
                             unsafe_allow_html=True,
                         )
                         if st.button(
