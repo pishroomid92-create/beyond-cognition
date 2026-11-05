@@ -690,11 +690,15 @@ with tab_map:
 
     st.markdown("""
     <style>
-    .bc-root {background:linear-gradient(120deg,#172554,#1e3a8a);color:#fff;padding:22px 24px;border-radius:16px;margin:8px 0 18px 0;border:1px solid #3b82f6}
+    .bc-root {background:linear-gradient(120deg,#111827,#172554 55%,#1e3a8a);color:#fff;padding:22px 24px;border-radius:18px;margin:8px 0 18px 0;border:1px solid #3b82f6;box-shadow:0 14px 38px rgba(15,23,42,.22)}
     .bc-root small {color:#bfdbfe;letter-spacing:.04em}
     .bc-root h3 {color:#fff;margin:6px 0;font-size:1.2rem}
     .bc-root p {color:#dbeafe;margin:0;font-size:.92rem}
     .bc-node {border:1px solid #334155;border-radius:13px;padding:14px 14px 10px 14px;background:rgba(30,41,59,.48);min-height:138px;margin-bottom:8px}
+    div[data-testid="stTabs"] button {font-weight:650}
+    div[data-testid="stTabs"] button[aria-selected="true"] {border-bottom:3px solid #60a5fa;color:#60a5fa}
+    .stMetric {background:rgba(30,41,59,.38);border:1px solid rgba(148,163,184,.22);padding:12px 14px;border-radius:14px}
+    div[data-testid="stExpander"] {border-radius:13px;border-color:rgba(148,163,184,.25)}
     .bc-node.selected {border:2px solid #60a5fa;background:rgba(30,64,175,.18)}
     .bc-node .role {font-weight:700;font-size:.95rem;color:inherit;margin-bottom:7px}
     .bc-node .meta {font-size:.78rem;opacity:.78;margin-bottom:8px}
@@ -747,7 +751,15 @@ with tab_map:
 
         st.markdown("### نقشه شاخه‌ای")
         if not map_steps:
-            st.info("هنوز گرهی ثبت نشده است. از بخش افزودن گره شروع کن.")
+            st.info("این پژوهش هنوز گرهی ندارد. ریشه پژوهش در بالا نمایش داده شده؛ نخستین عامل را از فرم افزودن گره بساز.")
+            empty_nodes_data, empty_edges_data = build_interactive_graph_data(
+                map_session, [], {}
+            )
+            agraph(
+                nodes=[Node(**item) for item in empty_nodes_data],
+                edges=[Edge(**item) for item in empty_edges_data],
+                config=Config(width="100%", height=560, directed=True, physics=False, hierarchical=True),
+            )
         else:
             selected_id = st.session_state.get("cognitive_map_selected_step_id")
             if selected_id not in map_step_ids:
