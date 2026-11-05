@@ -687,6 +687,20 @@ with tab_map:
     st.subheader("فضای کار شناختی")
     st.caption("ساختار درختی واقعی؛ گره‌ها می‌توانند والد، فرزند و خواهر/برادر مستقل داشته باشند.")
 
+    st.markdown("""
+    <style>
+    .bc-root {background:linear-gradient(120deg,#172554,#1e3a8a);color:#fff;padding:22px 24px;border-radius:16px;margin:8px 0 18px 0;border:1px solid #3b82f6}
+    .bc-root small {color:#bfdbfe;letter-spacing:.04em}
+    .bc-root h3 {color:#fff;margin:6px 0;font-size:1.2rem}
+    .bc-root p {color:#dbeafe;margin:0;font-size:.92rem}
+    .bc-node {border:1px solid #334155;border-radius:13px;padding:14px 14px 10px 14px;background:rgba(30,41,59,.48);min-height:138px;margin-bottom:8px}
+    .bc-node.selected {border:2px solid #60a5fa;background:rgba(30,64,175,.18)}
+    .bc-node .role {font-weight:700;font-size:.95rem;color:inherit;margin-bottom:7px}
+    .bc-node .meta {font-size:.78rem;opacity:.78;margin-bottom:8px}
+    .bc-node .preview {font-size:.82rem;opacity:.9;line-height:1.5}
+    </style>
+    """, unsafe_allow_html=True)
+
     if not sessions:
         st.info("ابتدا یک جلسه پژوهشی ایجاد کن.")
     else:
