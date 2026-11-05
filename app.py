@@ -13,6 +13,7 @@ from model_registry import PROVIDERS, configured_providers
 from provider_adapters import ModelProviderError, generate_model_response
 from workflow_agents import AGENT_SEQUENCE, build_agent_messages
 from cognitive_map import build_research_tree_dot, would_create_cycle
+from streamlit_agraph import agraph, Node, Edge, Config
 
 logger = logging.getLogger("beyond_cognition")
 st.set_page_config(page_title="فراتر از شناخت", page_icon="🧠", layout="wide")
@@ -45,7 +46,7 @@ def require_app_password():
 
 require_app_password()
 
-APP_VERSION = "0.9.0"
+APP_VERSION = "1.0.0"
 PAGE_SIZE = 500
 TABLES = ("research_sessions", "research_steps", "research_evidence", "model_runs", "research_records")
 ROLES = ["صورت‌بندی مسئله", "تحلیل‌گر", "فرضیه‌ساز", "منتقد", "ارزیاب شواهد", "ترکیب‌کننده", "یادداشت پژوهشگر"]
@@ -744,7 +745,7 @@ with tab_map:
         overview[2].metric("وضعیت", str(map_session.get("status") or "نامشخص"))
         overview[3].metric("نقش‌های اصلی", f'{len(set(x.get("role") for x in map_steps if x.get("role") in ROLES[:6]))}/6')
 
-        st.markdown("### نقشه شاخه‌ای")
+        st.markdown("### نقشه شناختی تعاملی")
         if not map_steps:
             st.info("هنوز گرهی ثبت نشده است. از بخش افزودن گره شروع کن.")
         else:
@@ -753,36 +754,88 @@ with tab_map:
                 selected_id = map_steps[0]["id"]
                 st.session_state["cognitive_map_selected_step_id"] = selected_id
 
-            for row_start in range(0, len(map_steps), 3):
-                cols = st.columns(3)
-                for offset, node in enumerate(map_steps[row_start:row_start + 3]):
-                    node_id = node["id"]
-                    selected = node_id == selected_id
-                    parent = next((x for x in map_steps if x["id"] == node.get("parent_step_id")), None)
-                    parent_name = parent.get("role") if parent else "ریشه"
-                    preview = (node.get("input_text") or node.get("output_text") or "بدون شرح").strip()
-                    preview = preview[:112] + ("…" if len(preview) > 112 else "")
-                    with cols[offset]:
-                        st.markdown(
-                            '<div class="bc-node' + (' selected' if selected else '') + '">' +
-                            '<div class="role">' + html.escape(str(node.get("role") or "گره")) + '</div>' +
-                            '<div class="meta">والد: ' + html.escape(str(parent_name)) +
-                            ' · ' + html.escape(str(node.get("epistemic_status") or "نامعلوم")) + '</div>' +
-                            '<div class="preview">' + html.escape(preview) + '</div></div>',
-                            unsafe_allow_html=True,
-                        )
-                        if st.button("● انتخاب‌شده" if selected else "انتخاب گره",
-                                     key="select_map_node_" + str(node_id),
-                                     use_container_width=True,
-                                     type="primary" if selected else "secondary"):
-                            st.session_state["cognitive_map_selected_step_id"] = node_id
-                            st.rerun()
+            collapsed = st.session_state.setdefault("cognitive_map_collapsed_ids", set())
+            # Hide descendants of collapsed nodes without changing persisted relationships.
+            children = {}
+            for item in map_steps:
+                children.setdefault(item.get("parent_step_id"), []).append(item["id"])
+            hidden_ids = set()
+            stack = [child for node_id in collapsed for child in children.get(node_id, [])]
+            while stack:
+                current = stack.pop()
+                if current in hidden_ids:
+                    continue
+                hidden_ids.add(current)
+                stack.extend(children.get(current, []))
+            visible_steps = [item for item in map_steps if item["id"] not in hidden_ids]
 
-            with st.expander("نمای درختی تعاملی/ساختاری (Graphviz)", expanded=True):
-                st.graphviz_chart(
-                    build_research_tree_dot(map_session, map_steps, evidence_by_map_step),
-                    use_container_width=True,
+            graph_nodes = [
+                Node(
+                    id="research-root",
+                    label=str(map_session.get("title") or "پرسش پژوهش")[:48],
+                    shape="box",
+                    color="#1d4ed8",
+                    font={"color": "#ffffff", "size": 20},
+                    size=34,
+                    title=str(map_session.get("central_question") or "ریشه پژوهش"),
                 )
+            ]
+            graph_edges = []
+            for item in visible_steps:
+                status = item.get("epistemic_status") or "نامعلوم / بررسی‌نشده"
+                node_color = "#16a34a" if status == "مستند" else "#d97706" if status == "فرضیه آزمون‌پذیر" else "#64748b"
+                node_id = str(item["id"])
+                graph_nodes.append(Node(
+                    id=node_id,
+                    label=(str(item.get("role") or "گره") + ("  ▸" if node_id in collapsed else ""))[:42],
+                    shape="box",
+                    color={"background": node_color, "border": "#60a5fa" if node_id == selected_id else node_color},
+                    font={"color": "#ffffff", "size": 15},
+                    size=24 if node_id == selected_id else 18,
+                    title=(str(item.get("epistemic_status") or "نامعلوم") + "\\n" +
+                           (str(item.get("input_text") or item.get("output_text") or "")[:300])),
+                ))
+                parent_id = item.get("parent_step_id")
+                graph_edges.append(Edge(
+                    source=str(parent_id) if parent_id and parent_id not in hidden_ids else "research-root",
+                    target=node_id,
+                    color="#94a3b8",
+                ))
+            graph_config = Config(
+                width="100%",
+                height=650,
+                directed=True,
+                physics=False,
+                hierarchical=True,
+                nodeHighlightBehavior=True,
+                highlightColor="#38bdf8",
+                collapsible=False,
+                interaction={"dragNodes": True, "dragView": True, "zoomView": True, "navigationButtons": True},
+            )
+            st.caption("گره‌ها را با ماوس جابه‌جا کن؛ با چرخ ماوس بزرگ‌نمایی کن. انتخاب گره، پنل ویرایش پایین صفحه را تغییر می‌دهد. چیدمان بصری فعلاً در همین نشست است و رابطه‌های ذخیره‌شده در پایگاه داده تغییر نمی‌کنند.")
+            selected_graph_node = agraph(nodes=graph_nodes, edges=graph_edges, config=graph_config)
+            if selected_graph_node and selected_graph_node != "research-root" and selected_graph_node in map_step_ids:
+                if selected_graph_node != st.session_state.get("cognitive_map_selected_step_id"):
+                    st.session_state["cognitive_map_selected_step_id"] = selected_graph_node
+                    st.rerun()
+
+            control_a, control_b, control_c = st.columns([2, 2, 3])
+            with control_a:
+                if st.button("جمع‌کردن شاخه انتخاب‌شده", disabled=selected_id in collapsed,
+                             key="collapse_branch_" + str(selected_id), use_container_width=True):
+                    collapsed.add(selected_id)
+                    st.session_state["cognitive_map_collapsed_ids"] = collapsed
+                    st.rerun()
+            with control_b:
+                if st.button("بازکردن شاخه انتخاب‌شده", disabled=selected_id not in collapsed,
+                             key="expand_branch_" + str(selected_id), use_container_width=True):
+                    collapsed.discard(selected_id)
+                    st.session_state["cognitive_map_collapsed_ids"] = collapsed
+                    st.rerun()
+            with control_c:
+                if st.button("بازکردن همه شاخه‌ها", key="expand_all_branches", use_container_width=True):
+                    st.session_state["cognitive_map_collapsed_ids"] = set()
+                    st.rerun()
 
             selected_step = next(x for x in map_steps if x["id"] == selected_id)
             selected_evidence = evidence_by_map_step.get(selected_id, [])
