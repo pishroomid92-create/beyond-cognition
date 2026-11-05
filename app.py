@@ -46,7 +46,7 @@ def require_app_password():
 
 require_app_password()
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 PAGE_SIZE = 500
 TABLES = ("research_sessions", "research_steps", "research_evidence", "model_runs", "research_records")
 ROLES = ["صورت‌بندی مسئله", "تحلیل‌گر", "فرضیه‌ساز", "منتقد", "ارزیاب شواهد", "ترکیب‌کننده", "یادداشت پژوهشگر"]
