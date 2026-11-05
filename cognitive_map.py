@@ -25,17 +25,17 @@ def build_research_tree_dot(session, steps, evidence_by_step):
         role = step.get("role") or "بدون نقش"
         status = step.get("epistemic_status") or "نامعلوم / بررسی‌نشده"
         color = "#16a34a" if status == "مستند" else "#d97706" if status == "فرضیه آزمون‌پذیر" else "#64748b"
-        label = f'{step.get("sequence_no", index + 1)} · {role}\\n{status}'
+        label = f'{step.get("sequence_no", index + 1)} · {role}\n{status}'
         lines.append(f'{node_id} [label={_dot_label(label)}, color="{color}"];')
         lines.append(f"{previous_node} -> {node_id};")
         previous_node = node_id
         for ev_index, evidence in enumerate((evidence_by_step or {}).get(step.get("id"), [])):
             ev_node = f"evidence_{index}_{ev_index}"
-            ev_label = f'شاهد: {evidence.get("evidence_type") or "بدون نوع"}\\n{evidence.get("source_title") or evidence.get("claim") or "بدون عنوان"}'
+            ev_label = f'شاهد: {evidence.get("evidence_type") or "بدون نوع"}\n{evidence.get("source_title") or evidence.get("claim") or "بدون عنوان"}'
             lines.append(f'{ev_node} [shape="note", fillcolor="#fef3c7", color="#d97706", label={_dot_label(ev_label)}];')
             lines.append(f"{node_id} -> {ev_node};")
     if not ordered_steps:
         lines.append('empty [label="هنوز گرهی ثبت نشده است", style="rounded,dashed,filled", fillcolor="#f8fafc"];')
         lines.append("root -> empty;")
     lines.append("}")
-    return "\\n".join(lines)
+    return "\n".join(lines)
