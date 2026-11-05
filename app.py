@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import streamlit as st
+from streamlit_agraph import agraph, Node, Edge, Config
 from supabase import create_client
 from workflow import summarize_workflow
 from model_registry import PROVIDERS, configured_providers
@@ -45,7 +46,7 @@ def require_app_password():
 
 require_app_password()
 
-APP_VERSION = "0.9.0"
+APP_VERSION = "1.0.0"
 PAGE_SIZE = 500
 TABLES = ("research_sessions", "research_steps", "research_evidence", "model_runs", "research_records")
 ROLES = ["صورت‌بندی مسئله", "تحلیل‌گر", "فرضیه‌ساز", "منتقد", "ارزیاب شواهد", "ترکیب‌کننده", "یادداشت پژوهشگر"]
@@ -778,7 +779,38 @@ with tab_map:
                             st.session_state["cognitive_map_selected_step_id"] = node_id
                             st.rerun()
 
-            with st.expander("نمای درختی تعاملی/ساختاری (Graphviz)", expanded=True):
+            with st.expander("نقشه گرافیکی تعاملی", expanded=True):
+                graph_nodes_data, graph_edges_data = build_interactive_graph_data(
+                    map_session, map_steps, evidence_by_map_step
+                )
+                graph_nodes = [Node(**item) for item in graph_nodes_data]
+                graph_edges = [Edge(**item) for item in graph_edges_data]
+                graph_config = Config(
+                    width="100%",
+                    height=560,
+                    directed=True,
+                    physics=False,
+                    hierarchical=True,
+                    nodeHighlightBehavior=True,
+                    highlightColor="#60a5fa",
+                )
+                graph_selection = agraph(
+                    nodes=graph_nodes,
+                    edges=graph_edges,
+                    config=graph_config,
+                )
+                if isinstance(graph_selection, str):
+                    if graph_selection.startswith("step:"):
+                        clicked_step_id = graph_selection.split(":", 1)[1]
+                    elif graph_selection.startswith("evidence:"):
+                        clicked_step_id = graph_selection.split(":")[1]
+                    else:
+                        clicked_step_id = None
+                    if clicked_step_id in map_step_ids and clicked_step_id != st.session_state.get("cognitive_map_selected_step_id"):
+                        st.session_state["cognitive_map_selected_step_id"] = clicked_step_id
+                        st.rerun()
+                st.caption("روی گره عامل یا شاهد کلیک کن تا جزئیات آن در پنل ویرایش باز شود. با کشیدن بوم می‌توانی نقشه را جابه‌جا و با چرخ ماوس بزرگ‌نمایی کنی؛ موقعیت دستی گره‌ها در این نسخه ذخیره نمی‌شود.")
+            with st.expander("نمای ساختاری متنی (Graphviz)", expanded=False):
                 st.graphviz_chart(
                     build_research_tree_dot(map_session, map_steps, evidence_by_map_step),
                     use_container_width=True,

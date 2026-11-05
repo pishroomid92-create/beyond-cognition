@@ -56,3 +56,61 @@ def build_research_tree_dot(session, steps, evidence_by_step):
         lines.append("root -> empty;")
     lines.append("}")
     return "\n".join(lines)
+
+
+
+def build_interactive_graph_data(session, steps, evidence_by_step):
+    """Return safe node/edge dictionaries for the interactive graph component."""
+    nodes = [{
+        "id": "root",
+        "label": str(session.get("title") or "پرسش پژوهش")[:100],
+        "size": 34,
+        "shape": "box",
+        "color": "#1d4ed8",
+        "font": {"color": "#ffffff", "size": 18},
+    }]
+    edges = []
+    ordered_steps = sorted(
+        steps or [],
+        key=lambda row: (int(row.get("sequence_no", 0)), str(row.get("id", ""))),
+    )
+    known_ids = {row.get("id") for row in ordered_steps}
+    for step in ordered_steps:
+        step_id = str(step.get("id"))
+        status = step.get("epistemic_status") or "نامعلوم / بررسی‌نشده"
+        color = "#16a34a" if status == "مستند" else "#d97706" if status == "فرضیه آزمون‌پذیر" else "#64748b"
+        label = str(step.get("role") or "گره") + "\\n" + status
+        nodes.append({
+            "id": "step:" + step_id,
+            "label": label[:120],
+            "size": 25,
+            "shape": "box",
+            "color": color,
+            "font": {"color": "#ffffff", "size": 14},
+        })
+        parent_id = step.get("parent_step_id")
+        parent_node = "step:" + str(parent_id) if parent_id in known_ids else "root"
+        edges.append({"source": parent_node, "target": "step:" + step_id})
+        for index, evidence in enumerate((evidence_by_step or {}).get(step.get("id"), [])):
+            evidence_id = "evidence:" + step_id
+            evidence_node_id = evidence_id + ":" + str(index)
+            evidence_label = str(evidence.get("source_title") or evidence.get("evidence_type") or "شاهد")
+            nodes.append({
+                "id": evidence_node_id,
+                "label": ("شاهد\\n" + evidence_label)[:100],
+                "size": 17,
+                "shape": "ellipse",
+                "color": "#b45309",
+                "font": {"color": "#ffffff", "size": 12},
+            })
+            edges.append({"source": "step:" + step_id, "target": evidence_node_id})
+    if not ordered_steps:
+        nodes.append({
+            "id": "empty",
+            "label": "هنوز گرهی ثبت نشده است",
+            "size": 18,
+            "shape": "box",
+            "color": "#64748b",
+        })
+        edges.append({"source": "root", "target": "empty"})
+    return nodes, edges
