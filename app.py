@@ -754,32 +754,9 @@ with tab_map:
                 selected_id = map_steps[0]["id"]
                 st.session_state["cognitive_map_selected_step_id"] = selected_id
 
-            for row_start in range(0, len(map_steps), 3):
-                cols = st.columns(3)
-                for offset, node in enumerate(map_steps[row_start:row_start + 3]):
-                    node_id = node["id"]
-                    selected = node_id == selected_id
-                    parent = next((x for x in map_steps if x["id"] == node.get("parent_step_id")), None)
-                    parent_name = parent.get("role") if parent else "ریشه"
-                    preview = (node.get("input_text") or node.get("output_text") or "بدون شرح").strip()
-                    preview = preview[:112] + ("…" if len(preview) > 112 else "")
-                    with cols[offset]:
-                        st.markdown(
-                            '<div class="bc-node' + (' selected' if selected else '') + '">' +
-                            '<div class="role">' + html.escape(str(node.get("role") or "گره")) + '</div>' +
-                            '<div class="meta">والد: ' + html.escape(str(parent_name)) +
-                            ' · ' + html.escape(str(node.get("epistemic_status") or "نامعلوم")) + '</div>' +
-                            '<div class="preview">' + html.escape(preview) + '</div></div>',
-                            unsafe_allow_html=True,
-                        )
-                        if st.button("● انتخاب‌شده" if selected else "انتخاب گره",
-                                     key="select_map_node_" + str(node_id),
-                                     use_container_width=True,
-                                     type="primary" if selected else "secondary"):
-                            st.session_state["cognitive_map_selected_step_id"] = node_id
-                            st.rerun()
+            with st.container(border=True):
+                st.markdown("#### نقشه زنده پژوهش")
 
-            with st.expander("نقشه گرافیکی تعاملی", expanded=True):
                 graph_nodes_data, graph_edges_data = build_interactive_graph_data(
                     map_session, map_steps, evidence_by_map_step
                 )
@@ -787,7 +764,7 @@ with tab_map:
                 graph_edges = [Edge(**item) for item in graph_edges_data]
                 graph_config = Config(
                     width="100%",
-                    height=560,
+                    height=720,
                     directed=True,
                     physics=False,
                     hierarchical=True,
@@ -810,7 +787,7 @@ with tab_map:
                     if clicked_step_id in map_step_ids and clicked_step_id != st.session_state.get("cognitive_map_selected_step_id"):
                         st.session_state["cognitive_map_selected_step_id"] = clicked_step_id
                         st.rerun()
-                st.caption("روی گره عامل یا شاهد کلیک کن تا جزئیات آن در پنل ویرایش باز شود. با کشیدن بوم می‌توانی نقشه را جابه‌جا و با چرخ ماوس بزرگ‌نمایی کنی؛ موقعیت دستی گره‌ها در این نسخه ذخیره نمی‌شود.")
+                st.caption("گره‌ها را انتخاب کن تا جزئیات و ویرایش همان گره در پایین نقشه نمایش داده شود. بوم قابل جابه‌جایی و بزرگ‌نمایی است؛ موقعیت دستی گره‌ها فعلاً ذخیره دائمی نمی‌شود.")
             with st.expander("نمای ساختاری متنی (Graphviz)", expanded=False):
                 st.graphviz_chart(
                     build_research_tree_dot(map_session, map_steps, evidence_by_map_step),
