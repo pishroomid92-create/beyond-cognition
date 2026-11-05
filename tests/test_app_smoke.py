@@ -53,5 +53,5 @@ def test_app_requires_password_before_rendering_research_workspace(monkeypatch):
     app.text_input[0].set_value("test-password-only")
     app.button[0].click().run()
     assert not app.exception, [str(item.value) for item in app.exception]
-    assert len(app.tabs) == 5
+    assert len(app.tabs) == 6
     assert any("فراتر از شناخت" in item.value for item in app.title)
