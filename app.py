@@ -803,7 +803,7 @@ with tab_map:
                     if graph_selection.startswith("step:"):
                         clicked_step_id = graph_selection.split(":", 1)[1]
                     elif graph_selection.startswith("evidence:"):
-                        clicked_step_id = graph_selection.split(":", 1)[1]
+                        clicked_step_id = graph_selection.split(":")[1]
                     else:
                         clicked_step_id = None
                     if clicked_step_id in map_step_ids and clicked_step_id != st.session_state.get("cognitive_map_selected_step_id"):
